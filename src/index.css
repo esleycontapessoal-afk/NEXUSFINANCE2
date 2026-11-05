@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+
+:root {
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
+  color: #eef2f8;
+  background: #0b0f17;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  --bg: #0b0f17;
+  --sidebar: #0d111a;
+  --surface: #121823;
+  --surface-raised: #171f2c;
+  --surface-hover: #1d2735;
+  --line: #222c3a;
+  --line-soft: #1d2633;
+  --text: #eef2f8;
+  --muted: #8d99aa;
+  --subtle: #647184;
+  --green: #6bdfa8;
+  --blue: #7aa8ff;
+  --red: #f27b7b;
+  --purple: #ac97ff;
+  --shadow: 0 20px 70px #0007;
+  font-synthesis: none;
+}
+
+:root[data-theme='light'] {
+  color: #202b3b;
+  background: #f5f7fb;
+  --bg: #f5f7fb;
+  --sidebar: #fff;
+  --surface: #fff;
+  --surface-raised: #f8fafd;
+  --surface-hover: #eef2f8;
+  --line: #e3e8ef;
+  --line-soft: #edf0f5;
+  --text: #202b3b;
+  --muted: #667387;
+  --subtle: #8995a5;
+  --green: #16875b;
+  --blue: #386fd0;
+  --red: #cf4c55;
+  --purple: #7356d7;
+  --shadow: 0 20px 70px #29384b18;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); }
+button, input, select { font: inherit; }
+button { color: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+::selection { color: #06120d; background: #6bdfa8; }

@@ -1,0 +1,4 @@
+project_id = "nexus-finance"
+
+[functions.admin-monitoring]
+verify_jwt = false
