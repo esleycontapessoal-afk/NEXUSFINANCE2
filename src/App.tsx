@@ -1491,6 +1491,14 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
               onAddBill={() => setBillModal('new')}
               onEditBill={setBillModal}
               onPay={openPayment}
+              onDeletePayment={(payment) => {
+                const transactions = data.transactions.filter((item) => item.sourcePaymentId === payment.id)
+                if (transactions.length !== 1) {
+                  setToast('Não foi possível localizar o lançamento associado; o pagamento foi mantido.')
+                  return
+                }
+                setDeleteTarget(transactions[0])
+              }}
               onDeleteDebt={(debt) => {
                 if (debt.installments.some((item) => item.payments.length > 0)) {
                   setToast('Esta dívida tem pagamentos registrados; mantenha o histórico e edite o contrato em vez de excluí-lo.')
@@ -1958,7 +1966,7 @@ function statusClass(status: string) {
 }
 
 function ObligationsPage({
-  debts, bills, now, onAddDebt, onEditDebt, onAddBill, onEditBill, onPay, onDeleteDebt, onDeleteBill,
+  debts, bills, now, onAddDebt, onEditDebt, onAddBill, onEditBill, onPay, onDeletePayment, onDeleteDebt, onDeleteBill,
 }: {
   debts: Debt[]
   bills: Bill[]
@@ -1968,6 +1976,7 @@ function ObligationsPage({
   onAddBill: () => void
   onEditBill: (bill: Bill) => void
   onPay: (target: PaymentTarget) => void
+  onDeletePayment: (payment: DebtPayment) => void
   onDeleteDebt: (debt: Debt) => void
   onDeleteBill: (bill: Bill) => void
 }) {
@@ -2084,7 +2093,7 @@ function ObligationsPage({
 
   if (debt) {
     const ordered = [...debt.installments].sort((a, b) => a.number - b.number)
-    return <DebtDetail debt={debt} installments={ordered} onBack={() => setSelectedDebtId(null)} onEdit={() => onEditDebt(debt)} onDelete={() => onDeleteDebt(debt)} onPay={(installment) => onPay({ kind: 'debt', debtId: debt.id, installmentNumber: installment.number, label: `${debt.name} · parcela ${installment.number}/${debt.installmentCount}`, remainingCents: installmentRemaining(installment) })} />
+    return <DebtDetail debt={debt} installments={ordered} onBack={() => setSelectedDebtId(null)} onEdit={() => onEditDebt(debt)} onDelete={() => onDeleteDebt(debt)} onPay={(installment) => onPay({ kind: 'debt', debtId: debt.id, installmentNumber: installment.number, label: `${debt.name} · parcela ${installment.number}/${debt.installmentCount}`, remainingCents: installmentRemaining(installment) })} onDeletePayment={onDeletePayment} />
   }
 
   return <>
@@ -2151,13 +2160,14 @@ function frequencyLabel(frequency: BillFrequency) {
   return labels[frequency]
 }
 
-function DebtDetail({ debt, installments, onBack, onEdit, onDelete, onPay }: {
+function DebtDetail({ debt, installments, onBack, onEdit, onDelete, onPay, onDeletePayment }: {
   debt: Debt
   installments: Installment[]
   onBack: () => void
   onEdit: () => void
   onDelete: () => void
   onPay: (installment: Installment) => void
+  onDeletePayment: (payment: DebtPayment) => void
 }) {
   const totals = debtTotals(debt)
   const typeLabel = debtTypes.find((type) => type.value === debt.type)?.label ?? 'Dívida'
@@ -2181,7 +2191,7 @@ function DebtDetail({ debt, installments, onBack, onEdit, onDelete, onPay }: {
           <span className="installment-total"><strong>{money(installment.amountCents)}</strong>{remaining > 0 && paid > 0 && <small>restam {money(remaining)}</small>}</span>
           <span className={statusClass(status)}>{statusLabel(status)}</span>
           {remaining > 0 ? <button className="button button-secondary installment-pay" onClick={() => onPay(installment)}><Banknote size={14} /> Registrar pagamento</button> : <span className="installment-paid-mark"><Check size={16} /> Quitada</span>}
-          {installment.payments.length > 0 && <div className="installment-payments">{installment.payments.map((payment) => <span key={payment.id}><Check size={12} /> {dateLabel(payment.date)} · {money(payment.amountCents)} · {payment.method}</span>)}</div>}
+          {installment.payments.length > 0 && <div className="installment-payments">{installment.payments.map((payment) => <div key={payment.id}><span><Check size={12} /> {dateLabel(payment.date)} · {money(payment.amountCents)} · {payment.method}</span><button className="icon-button small-icon" onClick={() => onDeletePayment(payment)} aria-label={`Excluir pagamento de ${money(payment.amountCents)} em ${dateLabel(payment.date)}`} title="Excluir pagamento"><Trash2 size={13} /></button></div>)}</div>}
         </article>
       })}</div>
     </section>

@@ -82,7 +82,9 @@
 .installment-pay { min-height: 28px; padding: 0 8px; font-size: 7px; }
 .installment-paid-mark { display: inline-flex; align-items: center; gap: 4px; color: var(--green); font-size: 8px; }
 .installment-payments { grid-column: 2 / -1; display: grid; gap: 4px; padding: 2px 0 5px; }
-.installment-payments span { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 7px; }.installment-payments svg { color: var(--green); }
+.installment-payments > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.installment-payments span { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 7px; }.installment-payments span svg { color: var(--green); }
+.installment-payments .icon-button { color: var(--red); }
 .bill-card-list { display: grid; }
 .bill-card { display: grid; grid-template-columns: 37px minmax(140px,1fr) minmax(100px,.7fr) minmax(80px,.5fr) auto; align-items: center; gap: 10px; padding: 13px 15px; border-top: 1px solid var(--line-soft); }
 .bill-card-overdue { border-left: 2px solid var(--red); background: #f27b7b08; }
