@@ -8,6 +8,7 @@ import {
   CalendarDays,
   CalendarPlus,
   Check,
+  CircleAlert,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -116,6 +117,7 @@ type Bill = {
   frequency: BillFrequency
   startDate: string
   endDate?: string
+  overdueRecord?: boolean
   dueDay: number
   accountId: string
   notes: string
@@ -329,6 +331,7 @@ function parseAppData(value: unknown): AppData {
       && ['once', 'weekly', 'monthly', 'quarterly', 'yearly'].includes(bill.frequency)
       && isValidDate(bill.startDate)
       && (bill.endDate === undefined || isValidDate(bill.endDate))
+      && (bill.overdueRecord === undefined || typeof bill.overdueRecord === 'boolean')
       && Number.isInteger(bill.dueDay)
       && bill.dueDay >= 1 && bill.dueDay <= 31
       && typeof bill.accountId === 'string'
@@ -1063,7 +1066,10 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
     const category = String(form.get('category') ?? '').trim()
     const amount = Number(String(form.get('amount') ?? '').replace(',', '.'))
     const amountCents = Math.round(amount * 100)
-    const frequency = String(form.get('frequency')) as BillFrequency
+    const editing = billModal !== 'new' && billModal ? billModal : null
+    const overdueRecord = form.get('entryMode') === 'overdue'
+      || (editing?.overdueRecord === true)
+    const frequency = overdueRecord ? 'once' : String(form.get('frequency')) as BillFrequency
     const startDate = String(form.get('startDate') ?? '')
     const endValue = String(form.get('endDate') ?? '')
     const endDate = endValue || undefined
@@ -1075,14 +1081,16 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
       || !['once', 'weekly', 'monthly', 'quarterly', 'yearly'].includes(frequency)
       || !isValidDate(startDate) || (endDate && !isValidDate(endDate))
       || (endDate && endDate < startDate)
+      || (overdueRecord && startDate >= todayString())
       || (frequency !== 'once' && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31))
     ) {
-      setToast('Confira o nome, valor, frequência e datas do compromisso recorrente.')
+      setToast(overdueRecord
+        ? 'Confira o nome, categoria, valor e uma data de vencimento anterior a hoje.'
+        : 'Confira o nome, valor, frequência e datas do compromisso recorrente.')
       return
     }
-    const editing = billModal !== 'new' && billModal ? billModal : null
     if (!editing && data.bills.some((item) => item.name.toLocaleLowerCase('pt-BR') === name.toLocaleLowerCase('pt-BR'))) {
-      setToast('Já existe uma conta recorrente com esse nome.')
+      setToast('Já existe uma conta ou dívida com esse nome.')
       return
     }
     const bill: Bill = {
@@ -1092,6 +1100,7 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
       amountCents,
       frequency,
       startDate,
+      ...(overdueRecord ? { overdueRecord: true } : {}),
       ...(endDate ? { endDate } : {}),
       dueDay,
       accountId,
@@ -1103,7 +1112,7 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
     }
     persist({ ...data, bills: editing ? data.bills.map((item) => item.id === editing.id ? bill : item) : [...data.bills, bill] })
     setBillModal(null)
-    setToast(editing ? 'Conta atualizada; pagamentos anteriores foram preservados.' : frequency === 'once' ? 'Conta de valor único cadastrada.' : 'Conta recorrente adicionada.')
+    setToast(editing ? (overdueRecord ? 'Dívida atualizada; pagamentos anteriores foram preservados.' : 'Conta atualizada; pagamentos anteriores foram preservados.') : overdueRecord ? 'Dívida atrasada registrada. Você poderá lançar pagamentos quando pagar.' : frequency === 'once' ? 'Conta de valor único cadastrada.' : 'Conta recorrente adicionada.')
   }
 
   const toggleCalendarEvent = (calendarEvent: CalendarEvent) => {
@@ -2128,14 +2137,20 @@ function BillsSection({ bills, now, onAdd, onEdit, onDelete, onPay }: {
   const [statusFilter, setStatusFilter] = useState('all')
   const [sort, setSort] = useState('next-due')
   const today = todayString()
+  const pendingDates = (bill: Bill) => {
+    const dates = Array.from({ length: 14 }, (_, index) => new Date(now.getFullYear(), now.getMonth() + index, 1))
+      .flatMap((month) => billOccurrenceDates(bill, month))
+      .filter((date) => occurrenceRemaining(bill, date) > 0)
+    if (bill.overdueRecord && occurrenceRemaining(bill, bill.startDate) > 0 && !dates.includes(bill.startDate)) {
+      dates.push(bill.startDate)
+    }
+    return dates.sort()
+  }
   const visibleBills = bills.filter((bill) => {
     const matchesSearch = !search || `${bill.name} ${bill.category} ${bill.notes}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'))
     const matchesCategory = categoryFilter === 'all' || bill.category === categoryFilter
     const matchesFrequency = frequencyFilter === 'all' || bill.frequency === frequencyFilter
-    const upcoming = Array.from({ length: 14 }, (_, index) => new Date(now.getFullYear(), now.getMonth() + index, 1))
-      .flatMap((month) => billOccurrenceDates(bill, month))
-      .filter((date) => occurrenceRemaining(bill, date) > 0)
-      .sort()[0]
+    const upcoming = pendingDates(bill)[0]
     const status = upcoming ? (upcoming < today ? 'overdue' : 'open')
       : bill.occurrences.some((item) => item.payments.length > 0) ? 'paid' : 'ended'
     const matchesStatus = statusFilter === 'all' || status === statusFilter
@@ -2144,24 +2159,22 @@ function BillsSection({ bills, now, onAdd, onEdit, onDelete, onPay }: {
     if (sort === 'amount-desc') return b.amountCents - a.amountCents
     if (sort === 'amount-asc') return a.amountCents - b.amountCents
     if (sort === 'name') return a.name.localeCompare(b.name, 'pt-BR')
-    const nextDate = (bill: Bill) => Array.from({ length: 14 }, (_, index) => new Date(now.getFullYear(), now.getMonth() + index, 1))
-      .flatMap((month) => billOccurrenceDates(bill, month))
-      .filter((date) => occurrenceRemaining(bill, date) > 0)
-      .sort()[0] ?? '9999-12-31'
+    const nextDate = (bill: Bill) => pendingDates(bill)[0] ?? '9999-12-31'
     return sort === 'next-due' ? nextDate(a).localeCompare(nextDate(b)) : b.startDate.localeCompare(a.startDate)
   })
   return <>
     <div className="panel obligation-list-panel">
-      <div className="obligation-list-toolbar"><div><h2>Contas e cobranças</h2><p>Cadastre contas recorrentes ou cobranças de valor único.</p></div><button className="button button-primary" onClick={onAdd}><Plus size={16} /> Nova conta</button></div>
+      <div className="obligation-list-toolbar"><div><h2>Contas e cobranças</h2><p>Registre dívidas vencidas e acompanhe pagamentos, além das suas contas.</p></div><button className="button button-primary" onClick={onAdd}><Plus size={16} /> Registrar dívida</button></div>
       {bills.length > 0 && <div className="obligation-controls obligation-controls-expanded"><label className="search-field"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar conta ou categoria" /></label><label className="filter-select"><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Filtrar por categoria"><option value="all">Todas as categorias</option>{Array.from(new Set(bills.map((bill) => bill.category))).sort((a, b) => a.localeCompare(b, 'pt-BR')).map((category) => <option key={category}>{category}</option>)}</select><ChevronDown size={13} /></label><label className="filter-select"><select value={frequencyFilter} onChange={(event) => setFrequencyFilter(event.target.value)} aria-label="Filtrar por frequência"><option value="all">Todos os tipos</option>{(['once', 'weekly', 'monthly', 'quarterly', 'yearly'] as BillFrequency[]).map((frequency) => <option key={frequency} value={frequency}>{frequencyLabel(frequency)}</option>)}</select><ChevronDown size={13} /></label><label className="filter-select"><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filtrar por status"><option value="all">Todos os status</option><option value="open">Em aberto</option><option value="overdue">Atrasadas</option><option value="paid">Pagas</option><option value="ended">Encerradas</option></select><ChevronDown size={13} /></label><label className="filter-select"><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Ordenar contas"><option value="next-due">Próximo vencimento</option><option value="amount-desc">Maior valor</option><option value="amount-asc">Menor valor</option><option value="name">Nome A–Z</option><option value="recent">Mais recentes</option></select><ChevronDown size={13} /></label></div>}
-      {bills.length === 0 ? <div className="table-empty"><div className="empty-ring"><CalendarDays size={19} /></div><strong>Nenhuma conta cadastrada</strong><span>Cadastre uma conta recorrente ou um compromisso de valor único.</span><button className="button button-primary" onClick={onAdd}><Plus size={15} /> Cadastrar conta</button></div> : visibleBills.length === 0 ? <div className="table-empty"><strong>Nenhuma conta encontrada</strong><span>Altere os filtros ou a busca para ver outros resultados.</span></div> : <div className="bill-card-list">{visibleBills.map((bill) => {
-        const nextOccurrences = Array.from({ length: 14 }, (_, index) => new Date(now.getFullYear(), now.getMonth() + index, 1)).flatMap((month) => billOccurrenceDates(bill, month))
-          .filter((date) => occurrenceRemaining(bill, date) > 0)
-          .sort()
+      {bills.length === 0 ? <div className="table-empty"><div className="empty-ring"><CircleAlert size={19} /></div><strong>Nenhuma dívida ou conta cadastrada</strong><span>Registre uma dívida já vencida para acompanhar o saldo e os pagamentos.</span><button className="button button-primary" onClick={onAdd}><Plus size={15} /> Registrar dívida atrasada</button></div> : visibleBills.length === 0 ? <div className="table-empty"><strong>Nenhuma conta encontrada</strong><span>Altere os filtros ou a busca para ver outros resultados.</span></div> : <div className="bill-card-list">{visibleBills.map((bill) => {
+        const nextOccurrences = pendingDates(bill)
         const nextDate = nextOccurrences[0]
         const nextRemaining = nextDate ? occurrenceRemaining(bill, nextDate) : 0
-          const nextAmount = nextDate ? bill.occurrences.find((occurrence) => occurrence.date === nextDate)?.amountCents ?? bill.amountCents : bill.amountCents
-          return <article className="bill-card" key={bill.id}><span className="bill-icon"><CalendarDays size={17} /></span><div className="bill-main"><strong>{bill.name}</strong><span>{bill.category} · {frequencyLabel(bill.frequency)}{bill.endDate ? ` · até ${dateLabel(bill.endDate)}` : ''}</span><small>{bill.notes || (bill.frequency === 'once' ? 'Cobrança avulsa' : 'Conta recorrente')}</small></div><div className="bill-next"><span>Próximo vencimento</span><strong>{nextDate ? dateLabel(nextDate) : 'Sem data futura'}</strong></div><div className="bill-amount"><strong>{money(nextAmount)}</strong><span>{nextDate ? statusLabel(occurrenceStatus(bill, nextDate)) : 'Encerrada'}</span></div><div className="bill-actions"><button className="icon-button small-icon" onClick={() => onEdit(bill)} title="Editar conta" aria-label={`Editar ${bill.name}`}><Ellipsis size={17} /></button><button className="icon-button small-icon" onClick={() => onDelete(bill)} title="Excluir conta" aria-label={`Excluir ${bill.name}`}><Trash2 size={15} /></button></div>{nextDate && <button className="button button-secondary bill-pay" onClick={() => onPay({ kind: 'bill', billId: bill.id, date: nextDate, label: bill.name, remainingCents: nextRemaining, preferredAccountId: bill.accountId })}><Banknote size={14} /> Registrar pagamento</button>}</article>
+        const nextAmount = nextDate ? bill.occurrences.find((occurrence) => occurrence.date === nextDate)?.amountCents ?? bill.amountCents : bill.amountCents
+        const nextStatus = nextDate ? occurrenceStatus(bill, nextDate) : bill.overdueRecord ? 'paid' : 'ended'
+        const displayDate = nextDate ?? (bill.overdueRecord ? bill.startDate : undefined)
+        const isOverdue = nextStatus === 'overdue' || nextStatus === 'partial-overdue'
+        return <article className={`bill-card ${isOverdue ? 'bill-card-overdue' : ''}`} key={bill.id}><span className={`bill-icon ${isOverdue ? 'bill-icon-overdue' : ''}`}>{isOverdue ? <CircleAlert size={17} /> : <CalendarDays size={17} />}</span><div className="bill-main"><strong>{bill.name}</strong><span>{bill.category} · {bill.overdueRecord ? 'Dívida atrasada' : frequencyLabel(bill.frequency)}{bill.endDate ? ` · até ${dateLabel(bill.endDate)}` : ''}</span><small>{bill.notes || (bill.overdueRecord ? 'Dívida registrada para pagamento futuro' : bill.frequency === 'once' ? 'Cobrança avulsa' : 'Conta recorrente')}</small></div><div className="bill-next"><span>{bill.overdueRecord ? 'Venceu em' : 'Próximo vencimento'}</span><strong>{displayDate ? dateLabel(displayDate) : 'Sem data futura'}</strong></div><div className="bill-amount"><strong>{money(nextAmount)}</strong><span className={isOverdue ? 'bill-overdue-label' : ''}>{isOverdue && <CircleAlert size={12} />}{isOverdue ? 'ATRASADA' : statusLabel(nextStatus)}</span></div><div className="bill-actions"><button className="icon-button small-icon" onClick={() => onEdit(bill)} title="Editar conta" aria-label={`Editar ${bill.name}`}><Ellipsis size={17} /></button><button className="icon-button small-icon" onClick={() => onDelete(bill)} title="Excluir conta" aria-label={`Excluir ${bill.name}`}><Trash2 size={15} /></button></div>{nextDate && <button className="button button-secondary bill-pay" onClick={() => onPay({ kind: 'bill', billId: bill.id, date: nextDate, label: bill.name, remainingCents: nextRemaining, preferredAccountId: bill.accountId })}><Banknote size={14} /> Registrar pagamento</button>}</article>
       })}</div>}
     </div>
     <p className="data-disclaimer"><CircleHelp size={14} /> Cobranças avulsas geram apenas um vencimento; contas recorrentes podem ser semanais, mensais, trimestrais ou anuais. O dia é ajustado ao último dia do mês quando necessário.</p>
@@ -2507,17 +2520,34 @@ function BillDialog({ bill, accounts, onClose, onSubmit }: {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
   const amount = (cents: number) => (cents / 100).toFixed(2)
-  const [frequency, setFrequency] = useState<BillFrequency>(bill?.frequency ?? 'monthly')
+  const [entryMode, setEntryMode] = useState<'overdue' | 'bill'>(bill?.overdueRecord ? 'overdue' : 'bill')
+  const [frequency, setFrequency] = useState<BillFrequency>(bill?.frequency ?? (bill ? 'monthly' : 'once'))
+  const yesterday = () => {
+    const now = new Date()
+    return dateToString(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
+  }
+  const [startDate, setStartDate] = useState(bill?.startDate ?? yesterday())
+  const isOverdueEntry = entryMode === 'overdue'
   return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><form className="form-dialog contract-dialog" onSubmit={onSubmit} role="dialog" aria-modal="true" aria-labelledby="bill-dialog-title">
-    <div className="dialog-header"><div><div className="eyebrow">CONTAS E COBRANÇAS</div><h2 id="bill-dialog-title">{bill ? 'Editar conta' : 'Nova conta ou cobrança'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><X size={18} /></button></div>
-    <label className="form-label">Nome da conta<input name="name" autoFocus maxLength={80} placeholder="Ex.: Internet, aluguel, energia" defaultValue={bill?.name ?? ''} required /></label>
-    <div className="form-two-columns"><label className="form-label">Categoria<select name="category" defaultValue={bill?.category ?? 'Contas domésticas'}>{expenseCategories.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-label">Valor por vencimento<input name="amount" type="number" min="0.01" step="0.01" placeholder="0,00" defaultValue={bill ? amount(bill.amountCents) : ''} required /></label></div>
-    <div className="form-two-columns"><label className="form-label">Tipo de cobrança<select name="frequency" value={frequency} onChange={(event) => setFrequency(event.target.value as BillFrequency)}><option value="once">Valor único</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="yearly">Anual</option></select></label>{frequency !== 'once' && <label className="form-label">Dia do vencimento<input name="dueDay" type="number" min="1" max="31" defaultValue={bill?.dueDay ?? 10} required /></label>}</div>
-    <div className="form-two-columns"><label className="form-label">{frequency === 'once' ? 'Data do vencimento' : 'Data de início'}<input name="startDate" type="date" defaultValue={bill?.startDate ?? todayString()} required /></label>{frequency !== 'once' && <label className="form-label">Data de término · opcional<input name="endDate" type="date" defaultValue={bill?.endDate ?? ''} /></label>}</div>
+    <div className="dialog-header"><div><div className="eyebrow">CONTAS E COBRANÇAS</div><h2 id="bill-dialog-title">{bill ? (bill.overdueRecord ? 'Editar dívida atrasada' : 'Editar conta') : 'Registrar dívida ou conta'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><X size={18} /></button></div>
+    {!bill && <label className="form-label">Tipo de cadastro<select name="entryMode" value={entryMode} onChange={(event) => {
+      const nextMode = event.target.value as 'overdue' | 'bill'
+      setEntryMode(nextMode)
+      setFrequency(nextMode === 'overdue' ? 'once' : 'monthly')
+      setStartDate(nextMode === 'overdue' ? yesterday() : todayString())
+    }}><option value="overdue">Dívida atrasada</option><option value="bill">Conta ou cobrança</option></select></label>}
+    {bill && <input type="hidden" name="entryMode" value={bill.overdueRecord ? 'overdue' : 'bill'} />}
+    <label className="form-label">Nome da conta<input name="name" autoFocus maxLength={80} placeholder={isOverdueEntry ? 'Ex.: Dívida do cartão' : 'Ex.: Internet, aluguel, energia'} defaultValue={bill?.name ?? ''} required /></label>
+    <div className="form-two-columns"><label className="form-label">Categoria<select name="category" defaultValue={bill?.category ?? 'Contas domésticas'}>{expenseCategories.map((category) => <option key={category}>{category}</option>)}</select></label><label className="form-label">{isOverdueEntry || frequency === 'once' ? 'Valor da dívida' : 'Valor por vencimento'}<input name="amount" type="number" min="0.01" step="0.01" placeholder="0,00" defaultValue={bill ? amount(bill.amountCents) : ''} required /></label></div>
+    {isOverdueEntry
+      ? <input type="hidden" name="frequency" value="once" />
+      : <div className="form-two-columns"><label className="form-label">Tipo de cobrança<select name="frequency" value={frequency} onChange={(event) => setFrequency(event.target.value as BillFrequency)}><option value="once">Valor único</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="yearly">Anual</option></select></label>{frequency !== 'once' && <label className="form-label">Dia do vencimento<input name="dueDay" type="number" min="1" max="31" defaultValue={bill?.dueDay ?? 10} required /></label>}</div>}
+    <div className="form-two-columns"><label className="form-label">{isOverdueEntry ? 'Data que venceu' : frequency === 'once' ? 'Data do vencimento' : 'Data de início'}<input name="startDate" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label>{!isOverdueEntry && frequency !== 'once' && <label className="form-label">Data de término · opcional<input name="endDate" type="date" defaultValue={bill?.endDate ?? ''} /></label>}</div>
     <label className="form-label">Conta preferida para pagamento<select name="accountId" defaultValue={bill?.accountId ?? accounts[0]?.id ?? ''}><option value="">Escolher ao pagar</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-    <label className="form-label">Observações<textarea name="notes" maxLength={300} rows={2} placeholder="Observações sobre esta conta" defaultValue={bill?.notes ?? ''} /></label>
+    <label className="form-label">Observações<textarea name="notes" maxLength={300} rows={2} placeholder="Observações sobre a conta ou dívida" defaultValue={bill?.notes ?? ''} /></label>
+    {isOverdueEntry && <p className="form-hint bill-overdue-hint"><CircleAlert size={14} /> A dívida será registrada como atrasada. Depois, use “Registrar pagamento” para quitar o valor.</p>}
     {bill?.occurrences.some((occurrence) => occurrence.payments.length > 0) && <p className="form-hint contract-preserve-note">Pagamentos anteriores serão mantidos mesmo que você altere o valor ou a frequência.</p>}
-    <div className="dialog-actions"><button type="button" className="button button-secondary" onClick={onClose}>Cancelar</button><button type="submit" className="button button-primary"><Check size={16} />{bill ? 'Salvar conta' : frequency === 'once' ? 'Cadastrar cobrança' : 'Criar vencimentos'}</button></div>
+    <div className="dialog-actions"><button type="button" className="button button-secondary" onClick={onClose}>Cancelar</button><button type="submit" className="button button-primary"><Check size={16} />{bill ? (bill.overdueRecord ? 'Salvar dívida' : 'Salvar conta') : isOverdueEntry ? 'Registrar dívida atrasada' : frequency === 'once' ? 'Cadastrar cobrança' : 'Criar vencimentos'}</button></div>
   </form></div>
 }
 

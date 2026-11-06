@@ -73,7 +73,7 @@ Com o monitoramento ativo, o painel mostra e-mails de contas que já acessaram o
 - Indicadores de parcelas em aberto, quitadas, atrasadas e vencendo em até 7 dias; lembretes locais configuráveis aparecem no dashboard conforme o vencimento.
 - Campos informativos para valor efetivamente recebido, taxa anual e CET em empréstimos; esses dados não recalculam o contrato.
 - Aba **MEUS OBJETIVOS** com cofrinhos personalizados, metas, depósitos e retiradas vinculados como transferências internas, histórico, gráficos, simulação de rendimento, conquistas, filtros e depósitos recorrentes locais.
-- Contas avulsas e recorrentes semanais, mensais, trimestrais e anuais, com busca e filtros por categoria, frequência e situação, ordenação e registro de pagamentos.
+- Cadastro de dívidas vencidas com data original, categoria, conta preferida e acompanhamento visual em destaque até a quitação; contas avulsas e recorrentes continuam disponíveis com busca, filtros e registro de pagamentos.
 - Calendário integrado aos vencimentos de dívidas e contas; compromissos futuros não afetam o saldo até que um pagamento seja registrado.
 - Relatórios por período e exportação de lançamentos em CSV.
 - Exportação e restauração de backup JSON, com validação e confirmação antes de substituir os dados.
