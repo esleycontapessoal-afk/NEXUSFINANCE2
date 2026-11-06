@@ -86,8 +86,10 @@
 .bill-card-list { display: grid; }
 .bill-card { display: grid; grid-template-columns: 37px minmax(140px,1fr) minmax(100px,.7fr) minmax(80px,.5fr) auto; align-items: center; gap: 10px; padding: 13px 15px; border-top: 1px solid var(--line-soft); }
 .bill-card-overdue { border-left: 2px solid var(--red); background: #f27b7b08; }
+.bill-card-settled { border-left: 2px solid var(--green); background: #6bdfa808; }
 .bill-icon { color: var(--purple); border-color: #ac97ff29; background: #ac97ff12; }
 .bill-icon-overdue { color: var(--red); border-color: #f27b7b55; background: #f27b7b16; }
+.bill-icon-settled { color: var(--green); border-color: #6bdfa855; background: #6bdfa816; }
 .bill-main { display: grid; min-width: 0; gap: 4px; }
 .bill-main strong { overflow: hidden; font-size: 9px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .bill-main span,.bill-main small { overflow: hidden; color: var(--muted); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
@@ -96,6 +98,7 @@
 .bill-next strong,.bill-amount strong { font-size: 8px; font-weight: 600; }
 .bill-amount { justify-items: end; }
 .bill-overdue-label { display: inline-flex; align-items: center; gap: 4px; color: var(--red) !important; font-weight: 700; }
+.bill-settled-label { color: var(--green) !important; font-weight: 700; }
 .bill-actions { display: flex; gap: 1px; }
 .bill-pay { grid-column: 2 / -1; justify-self: start; min-height: 28px; font-size: 7px; }
 .monthly-controls { display: flex; align-items: center; gap: 6px; padding: 9px; }
