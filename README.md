@@ -76,6 +76,7 @@ Com o monitoramento ativo, o painel mostra e-mails de contas que já acessaram o
 - Cadastro de dívidas vencidas com data original, categoria, conta preferida e acompanhamento visual em destaque até a quitação; elas aparecem junto com os contratos na lista principal e entram no saldo devedor. Contas avulsas e recorrentes continuam disponíveis na seção própria.
 - Calendário integrado aos vencimentos de dívidas e contas; compromissos futuros não afetam o saldo até que um pagamento seja registrado.
 - Relatórios por período e exportação de lançamentos em CSV.
+- Caderno pessoal para criar, editar e excluir anotações salvas junto aos dados e incluídas nos backups.
 - Exportação e restauração de backup JSON, com validação e confirmação antes de substituir os dados.
 - Painel administrativo protegido no Supabase para acompanhar acessos e presença recente, com aviso de privacidade.
 - Tema claro/escuro e layout responsivo.

@@ -5,6 +5,7 @@ import {
   ArrowLeftRight,
   ArrowUpRight,
   Banknote,
+  BookOpen,
   CalendarDays,
   CalendarPlus,
   Check,
@@ -153,6 +154,12 @@ type Account = {
   openingBalanceCents: number
   color: string
 }
+type NotebookNote = {
+  id: string
+  title: string
+  content: string
+  updatedAt: string
+}
 type AppData = {
   version: 1
   theme: 'dark' | 'light'
@@ -161,6 +168,7 @@ type AppData = {
   debts: Debt[]
   bills: Bill[]
   accounts: Account[]
+  notes?: NotebookNote[]
   reminderDays?: number[]
   savingsGoals: SavingsGoal[]
   savingsSchedules: SavingsSchedule[]
@@ -178,7 +186,7 @@ type FinanceAppProps = {
   onRetrySync?: () => void
   onSignOut?: () => void
 }
-type Page = 'dashboard' | 'transactions' | 'accounts' | 'calendar' | 'obligations' | 'savings' | 'reports' | 'settings' | 'admin'
+type Page = 'dashboard' | 'transactions' | 'accounts' | 'calendar' | 'obligations' | 'notes' | 'savings' | 'reports' | 'settings' | 'admin'
 
 const STORAGE_KEY = 'nexus-finance-data-v1'
 const defaultReminderDays = [7, 3, 1, 0]
@@ -228,6 +236,7 @@ function emptyData(): AppData {
     debts: [],
     bills: [],
     accounts: [],
+    notes: [],
     reminderDays: defaultReminderDays,
     savingsGoals: [],
     savingsSchedules: [],
@@ -422,11 +431,19 @@ function parseAppData(value: unknown): AppData {
       && transaction.type === (movement.type === 'deposit' ? 'transfer-out' : 'transfer-in'),
     ).length === 1
   })
+  const notes = data.notes ?? []
+  const validNotes = Array.isArray(notes) && notes.length <= 500 && notes.every((item) =>
+    item && typeof item === 'object'
+    && typeof item.id === 'string'
+    && typeof item.title === 'string' && item.title.trim().length > 0 && item.title.length <= 120
+    && typeof item.content === 'string' && item.content.length <= 20_000
+    && typeof item.updatedAt === 'string' && Number.isFinite(Date.parse(item.updatedAt)),
+  )
   const reminderDays = data.reminderDays ?? defaultReminderDays
   const validReminderDays = Array.isArray(reminderDays)
     && reminderDays.every((day) => Number.isInteger(day) && day >= 0 && day <= 30)
     && new Set(reminderDays).size === reminderDays.length
-  if (!validTransactions || !validAccounts || !validCalendarEvents || !validDebts || !validBills || !validReminderDays || !validSavingsGoals || !validSavingsSchedules || !validSavingsAchievements || !validGoalTransactions) throw new Error('O backup contém registros inválidos. Nenhum dado foi alterado.')
+  if (!validTransactions || !validAccounts || !validCalendarEvents || !validDebts || !validBills || !validNotes || !validReminderDays || !validSavingsGoals || !validSavingsSchedules || !validSavingsAchievements || !validGoalTransactions) throw new Error('O backup contém registros inválidos. Nenhum dado foi alterado.')
   return {
     version: 1,
     theme: data.theme,
@@ -435,6 +452,7 @@ function parseAppData(value: unknown): AppData {
     debts,
     bills,
     accounts: data.accounts,
+    notes,
     reminderDays,
     savingsGoals,
     savingsSchedules,
@@ -1287,6 +1305,7 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
     { id: 'accounts', label: 'Bancos', icon: Wallet },
     { id: 'calendar', label: 'Calendário', icon: CalendarDays },
     { id: 'obligations', label: 'Dívidas e contas', icon: Banknote },
+    { id: 'notes', label: 'Anotações', icon: BookOpen },
     { id: 'savings', label: 'MEUS OBJETIVOS', icon: Target },
     { id: 'reports', label: 'Relatórios', icon: FileText },
   ]
@@ -1298,6 +1317,7 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
     accounts: 'Bancos',
     calendar: 'Calendário',
     obligations: 'Dívidas e contas',
+    notes: 'Anotações',
     savings: 'MEUS OBJETIVOS',
     reports: 'Relatórios',
     settings: 'Configurações',
@@ -1522,6 +1542,13 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
             />
           )}
 
+          {page === 'notes' && (
+            <NotesPage
+              notes={data.notes ?? []}
+              onSave={(notes) => persist({ ...data, notes })}
+            />
+          )}
+
           {page === 'settings' && (
             <SettingsPage
               data={data}
@@ -1596,6 +1623,7 @@ const descriptions: Record<Page, string> = {
   accounts: 'Acompanhe seus bancos e os saldos das contas cadastradas.',
   calendar: 'Navegue pelas datas e gerencie suas movimentações financeiras.',
   obligations: 'Acompanhe dívidas, empréstimos e contas recorrentes até a quitação.',
+  notes: 'Anote lembretes, ideias e informações importantes em seu caderno pessoal.',
   savings: 'Organize seus planos, acompanhe suas reservas e celebre cada conquista.',
   reports: 'Entenda seus movimentos financeiros por período.',
   settings: 'Personalize sua experiência e gerencie seus dados locais.',
@@ -2014,7 +2042,8 @@ function ObligationsPage({
     + overdueBillRecords.reduce((sum, bill) => sum + overdueBillBalance(bill), 0)
   const totalPaid = debts.reduce((sum, item) => sum + debtTotals(item).totalPaid, 0)
     + overdueBillRecords.reduce((sum, bill) => sum + paymentTotal(getBillOccurrence(bill, bill.startDate)?.payments ?? []), 0)
-  const allOverdueCount = overdueInstallments.length + unpaidOverdueBillRecords.length
+  const overdueDebtCount = new Set(overdueInstallments.map(({ debt }) => debt.id)).size
+  const allOverdueCount = overdueDebtCount + unpaidOverdueBillRecords.length
   const monthlyCommitment = debts.reduce((sum, item) => sum + item.installments.filter((installment) => installment.dueDate.slice(0, 7) === monthKey(now)).reduce((value, installment) => value + installmentRemaining(installment), 0), 0)
     + bills.reduce((sum, bill) => sum + billOccurrenceDates(bill, new Date(now.getFullYear(), now.getMonth(), 1)).reduce((value, date) => value + occurrenceRemaining(bill, date), 0), 0)
   const filteredDebts = debts.filter((item) => {
@@ -2074,10 +2103,10 @@ function ObligationsPage({
       <div className="installment-indicators" aria-label="Indicadores de parcelas">
         <div><span>Parcelas em aberto</span><strong>{openInstallmentCount}</strong></div>
         <div><span>Parcelas quitadas</span><strong>{paidInstallmentCount}</strong></div>
-        <div className="indicator-overdue"><span>Parcelas atrasadas</span><strong>{allOverdueCount}</strong></div>
+        <div className="indicator-overdue"><span>Contas atrasadas</span><strong>{allOverdueCount}</strong></div>
         <div className="indicator-soon"><span>Vencem em até 7 dias</span><strong>{soonInstallments.length}</strong></div>
       </div>
-      {(allOverdueCount > 0 || soonInstallments.length > 0) && <div className={`obligation-alert ${allOverdueCount ? 'alert-overdue' : ''}`}><CircleHelp size={17} /><span>{allOverdueCount > 0 ? `${allOverdueCount} parcela${allOverdueCount === 1 ? '' : 's'} em atraso` : `${soonInstallments.length} parcela${soonInstallments.length === 1 ? '' : 's'} vence${soonInstallments.length === 1 ? '' : 'm'} nos próximos 7 dias`}. Confira os vencimentos e atualize os pagamentos.</span><button className="text-button" onClick={() => { setTab('monthly'); setSelectedMonth(new Date(now.getFullYear(), now.getMonth(), 1)) }}>Ver agenda <ArrowUpRight size={14} /></button></div>}
+      {(allOverdueCount > 0 || soonInstallments.length > 0) && <div className={`obligation-alert ${allOverdueCount ? 'alert-overdue' : ''}`}><CircleHelp size={17} /><span>{allOverdueCount > 0 ? `${allOverdueCount} conta${allOverdueCount === 1 ? '' : 's'} atrasada${allOverdueCount === 1 ? '' : 's'}` : `${soonInstallments.length} parcela${soonInstallments.length === 1 ? '' : 's'} vence${soonInstallments.length === 1 ? '' : 'm'} nos próximos 7 dias`}. Confira os vencimentos e atualize os pagamentos.</span><button className="text-button" onClick={() => { setTab('monthly'); setSelectedMonth(new Date(now.getFullYear(), now.getMonth(), 1)) }}>Ver agenda <ArrowUpRight size={14} /></button></div>}
       <div className="panel obligation-list-panel">
         <div className="obligation-list-toolbar"><div><h2>Suas dívidas</h2><p>Dívidas em atraso e contratos parcelados ficam reunidos nesta lista.</p></div><button className="button button-primary" onClick={onAddDebt}><Plus size={16} /> Nova dívida</button></div>
         <div className="obligation-controls obligation-controls-expanded"><label className="search-field"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por dívida, instituição ou descrição" /></label><label className="filter-select"><ListFilter size={14} /><select value={debtFilter} onChange={(event) => setDebtFilter(event.target.value)} aria-label="Filtrar dívidas"><option value="all">Todos os status</option><option value="active">Em dia</option><option value="overdue">Atrasadas</option><option value="soon">Próximos vencimentos</option><option value="settled">Quitadas</option><option value="single">Valor único</option><option value="installments">Parceladas</option></select><ChevronDown size={13} /></label><label className="filter-select"><select value={debtTypeFilter} onChange={(event) => setDebtTypeFilter(event.target.value)} aria-label="Filtrar por tipo"><option value="all">Todos os tipos</option>{debtTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select><ChevronDown size={13} /></label><label className="filter-select"><select value={debtSort} onChange={(event) => setDebtSort(event.target.value)} aria-label="Ordenar dívidas"><option value="next-due">Próximo vencimento</option><option value="balance-desc">Maior saldo</option><option value="balance-asc">Menor saldo</option><option value="name">Nome A–Z</option><option value="recent">Mais recentes</option></select><ChevronDown size={13} /></label></div>
@@ -2157,6 +2186,82 @@ function DebtDetail({ debt, installments, onBack, onEdit, onDelete, onPay }: {
     </section>
     <p className="data-disclaimer"><CircleHelp size={14} /> A entrada informada é considerada no progresso, mas não gera movimentação histórica. O sistema não estima juros, descontos nem recalcula o contrato.</p>
   </div>
+}
+
+function NotesPage({ notes, onSave }: {
+  notes: NotebookNote[]
+  onSave: (notes: NotebookNote[]) => void
+}) {
+  const [activeId, setActiveId] = useState<string | null>(() => notes[0]?.id ?? null)
+  const [title, setTitle] = useState(() => notes[0]?.title ?? '')
+  const [content, setContent] = useState(() => notes[0]?.content ?? '')
+  const [error, setError] = useState('')
+  const activeNote = notes.find((note) => note.id === activeId)
+  const sortedNotes = [...notes].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+
+  const startNewNote = () => {
+    setActiveId(null)
+    setTitle('')
+    setContent('')
+    setError('')
+  }
+
+  const saveNote = () => {
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) {
+      setError('Dê um título para esta anotação.')
+      return
+    }
+    if (!activeId && notes.length >= 500) {
+      setError('O caderno chegou ao limite de 500 anotações.')
+      return
+    }
+    const note: NotebookNote = {
+      id: activeId ?? crypto.randomUUID(),
+      title: trimmedTitle,
+      content,
+      updatedAt: new Date().toISOString(),
+    }
+    onSave(activeId
+      ? notes.map((item) => item.id === activeId ? note : item)
+      : [note, ...notes])
+    setActiveId(note.id)
+    setTitle(note.title)
+    setError('')
+  }
+
+  const deleteNote = () => {
+    if (!activeNote || !window.confirm(`Excluir a anotação “${activeNote.title}”?`)) return
+    onSave(notes.filter((note) => note.id !== activeNote.id))
+    startNewNote()
+  }
+
+  return <section className="notebook-layout">
+    <aside className="panel notebook-list">
+      <div className="notebook-list-heading"><div><BookOpen size={17} /><div><h2>Meu caderno</h2><span>{notes.length} {notes.length === 1 ? 'anotação' : 'anotações'}</span></div></div><button className="button button-primary" onClick={startNewNote}><Plus size={15} /> Nova</button></div>
+      {sortedNotes.length === 0
+        ? <div className="notebook-empty-list"><BookOpen size={22} /><strong>Seu caderno está vazio</strong><span>Crie uma anotação para guardar lembretes e ideias.</span></div>
+        : <div className="notebook-note-list">{sortedNotes.map((note) =>
+          <button key={note.id} className={`notebook-note-item ${activeId === note.id ? 'active' : ''}`} onClick={() => {
+            setActiveId(note.id)
+            setTitle(note.title)
+            setContent(note.content)
+            setError('')
+          }}>
+            <strong>{note.title}</strong>
+            <span>{note.content || 'Sem conteúdo'}</span>
+            <small>{new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(note.updatedAt))}</small>
+          </button>,
+        )}</div>}
+    </aside>
+    <section className="panel notebook-editor">
+      <div className="notebook-editor-heading"><div><span className="eyebrow">ANOTAÇÕES PESSOAIS</span><h2>{activeNote ? 'Editar anotação' : 'Nova anotação'}</h2></div>{activeNote && <button className="icon-button" onClick={deleteNote} aria-label="Excluir anotação" title="Excluir anotação"><Trash2 size={16} /></button>}</div>
+      <label className="form-label">Título<input value={title} onChange={(event) => { setTitle(event.target.value); setError('') }} maxLength={120} placeholder="Ex.: Ideias para economizar" /></label>
+      <label className="form-label notebook-content-label">Anotação<textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={20_000} placeholder="Escreva aqui..." rows={14} /></label>
+      {error && <span className="notebook-error" role="alert">{error}</span>}
+      <div className="notebook-editor-footer"><span>Salvo neste espaço e incluído no backup.</span><button className="button button-primary" onClick={saveNote}><Check size={15} /> Salvar anotação</button></div>
+    </section>
+  </section>
 }
 
 function BillsSection({ bills, now, onAdd, onEdit, onDelete, onPay }: {
