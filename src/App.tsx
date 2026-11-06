@@ -2138,6 +2138,7 @@ function ObligationsPage({
           </article>
         })}</div>}
       </div>
+      <BillsSection bills={bills} now={now} onAdd={onAddBill} onEdit={onEditBill} onDelete={onDeleteBill} onPay={onPay} embedded />
     </>}
     {tab === 'bills' && <BillsSection bills={bills} now={now} onAdd={onAddBill} onEdit={onEditBill} onDelete={onDeleteBill} onPay={onPay} />}
     {tab === 'monthly' && <MonthlyCommitments month={selectedMonth} monthLabel={monthLabel} items={monthlyItems} paid={monthlyPaid} pending={monthlyPending} overdue={monthlyOverdue} onChangeMonth={(offset) => setSelectedMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1))} onPay={onPay} onGoBills={() => setTab('bills')} />}
@@ -2264,13 +2265,14 @@ function NotesPage({ notes, onSave }: {
   </section>
 }
 
-function BillsSection({ bills, now, onAdd, onEdit, onDelete, onPay }: {
+function BillsSection({ bills, now, onAdd, onEdit, onDelete, onPay, embedded = false }: {
   bills: Bill[]
   now: Date
   onAdd: () => void
   onEdit: (bill: Bill) => void
   onDelete: (bill: Bill) => void
   onPay: (target: PaymentTarget) => void
+  embedded?: boolean
 }) {
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
@@ -2306,7 +2308,7 @@ function BillsSection({ bills, now, onAdd, onEdit, onDelete, onPay }: {
   })
   return <>
     <div className="panel obligation-list-panel">
-      <div className="obligation-list-toolbar"><div><h2>Contas e cobranças</h2><p>Registre dívidas vencidas e acompanhe pagamentos, além das suas contas.</p></div><button className="button button-primary" onClick={onAdd}><Plus size={16} /> Registrar dívida</button></div>
+      <div className="obligation-list-toolbar"><div><h2>Contas e cobranças</h2><p>{embedded ? 'Contas avulsas e recorrentes também aparecem nesta visão geral.' : 'Registre e acompanhe contas avulsas ou recorrentes.'}</p></div><button className="button button-primary" onClick={onAdd}><Plus size={16} /> Nova conta ou cobrança</button></div>
       {regularBills.length > 0 && <div className="obligation-controls obligation-controls-expanded"><label className="search-field"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar conta ou categoria" /></label><label className="filter-select"><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Filtrar por categoria"><option value="all">Todas as categorias</option>{Array.from(new Set(regularBills.map((bill) => bill.category))).sort((a, b) => a.localeCompare(b, 'pt-BR')).map((category) => <option key={category}>{category}</option>)}</select><ChevronDown size={13} /></label><label className="filter-select"><select value={frequencyFilter} onChange={(event) => setFrequencyFilter(event.target.value)} aria-label="Filtrar por frequência"><option value="all">Todos os tipos</option>{(['once', 'weekly', 'monthly', 'quarterly', 'yearly'] as BillFrequency[]).map((frequency) => <option key={frequency} value={frequency}>{frequencyLabel(frequency)}</option>)}</select><ChevronDown size={13} /></label><label className="filter-select"><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filtrar por status"><option value="all">Todos os status</option><option value="open">Em aberto</option><option value="overdue">Atrasadas</option><option value="paid">Pagas</option><option value="ended">Encerradas</option></select><ChevronDown size={13} /></label><label className="filter-select"><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Ordenar contas"><option value="next-due">Próximo vencimento</option><option value="amount-desc">Maior valor</option><option value="amount-asc">Menor valor</option><option value="name">Nome A–Z</option><option value="recent">Mais recentes</option></select><ChevronDown size={13} /></label></div>}
       {regularBills.length === 0 ? <div className="table-empty"><div className="empty-ring"><CalendarDays size={19} /></div><strong>Nenhuma conta cadastrada</strong><span>As dívidas atrasadas são exibidas junto com as outras dívidas.</span><button className="button button-primary" onClick={onAdd}><Plus size={15} /> Cadastrar conta</button></div> : visibleBills.length === 0 ? <div className="table-empty"><strong>Nenhuma conta encontrada</strong><span>Altere os filtros ou a busca para ver outros resultados.</span></div> : <div className="bill-card-list">{visibleBills.map((bill) => {
         const nextOccurrences = pendingDates(bill)
