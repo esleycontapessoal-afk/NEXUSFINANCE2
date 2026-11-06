@@ -956,7 +956,6 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
     const installmentAmount = installmentCount === 1
       ? originalAmount
       : Number(String(form.get('installmentAmount') ?? '').replace(',', '.'))
-    const startDate = String(form.get('startDate') ?? '')
     const firstDueDate = String(form.get('firstDueDate') ?? '')
     const dueDay = installmentCount === 1 ? Number(firstDueDate.slice(8, 10)) : Number(form.get('dueDay'))
     const interest = Number(String(form.get('monthlyInterest') ?? '').replace(',', '.'))
@@ -980,7 +979,7 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
       || !Number.isSafeInteger(originalAmountCents) || originalAmountCents <= 0
       || !Number.isSafeInteger(installmentAmountCents) || installmentAmountCents <= 0
       || !Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 600
-      || !isValidDate(startDate) || !isValidDate(firstDueDate)
+      || !isValidDate(firstDueDate)
       || (installmentCount > 1 && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31))
       || !Number.isFinite(interest) || interest < 0 || !Number.isSafeInteger(monthlyInterestBps)
       || (annualInterest !== undefined && (!Number.isFinite(annualInterest) || annualInterest < 0 || !Number.isSafeInteger(annualInterestBps)))
@@ -1031,7 +1030,7 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
       ...(receivedAmountCents === undefined ? {} : { receivedAmountCents }),
       installmentAmountCents,
       installmentCount,
-      startDate,
+      startDate: firstDueDate,
       dueDay,
       firstDueDate,
       ...(interest > 0 ? { monthlyInterestBps } : {}),
@@ -2453,7 +2452,6 @@ function DebtDialog({ debt, onClose, onSubmit }: {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
   const amount = (cents: number) => (cents / 100).toFixed(2)
-  const [startDate, setStartDate] = useState(debt?.startDate ?? todayString())
   const [firstDueDate, setFirstDueDate] = useState(debt?.firstDueDate ?? addMonthsWithDay(todayString(), 1))
   const [installmentCount, setInstallmentCount] = useState(String(debt?.installmentCount ?? 12))
   const [dueDay, setDueDay] = useState(String(debt?.dueDay ?? 5))
@@ -2463,10 +2461,6 @@ function DebtDialog({ debt, onClose, onSubmit }: {
     && Number.isInteger(parsedCount) && parsedCount > 0 && parsedCount <= 600
     && Number.isInteger(parsedDueDay) && parsedDueDay >= 1 && parsedDueDay <= 31
   const lastDueDate = hasSchedulePreview ? addMonthsWithDay(firstDueDate, parsedCount - 1, parsedDueDay) : ''
-  const startGapMonths = hasSchedulePreview && isValidDate(startDate)
-    ? (Number(firstDueDate.slice(0, 4)) - Number(startDate.slice(0, 4))) * 12
-      + Number(firstDueDate.slice(5, 7)) - Number(startDate.slice(5, 7))
-    : 0
   return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><form className="form-dialog contract-dialog" onSubmit={onSubmit} role="dialog" aria-modal="true" aria-labelledby="debt-dialog-title">
     <div className="dialog-header"><div><div className="eyebrow">FINANCIAMENTO E EMPRÉSTIMO</div><h2 id="debt-dialog-title">{debt ? 'Editar contrato' : 'Cadastrar dívida'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><X size={18} /></button></div>
     <div className="form-two-columns"><label className="form-label">Nome da dívida<input name="name" autoFocus maxLength={80} placeholder="Ex.: Financiamento da moto" defaultValue={debt?.name ?? ''} required /></label><label className="form-label">Tipo<select name="type" defaultValue={debt?.type ?? 'other'}>{debtTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label></div>
@@ -2474,13 +2468,12 @@ function DebtDialog({ debt, onClose, onSubmit }: {
     <label className="form-label">Valor efetivamente recebido · opcional<input name="receivedAmount" type="number" step="0.01" min="0.01" placeholder="Não informado" defaultValue={debt?.receivedAmountCents ? amount(debt.receivedAmountCents) : ''} /></label>
     <label className="form-label">Descrição (opcional)<input name="description" maxLength={150} placeholder="Detalhes do contrato" defaultValue={debt?.description ?? ''} /></label>
     <div className="form-two-columns">{parsedCount > 1 && <label className="form-label">Valor da parcela<input name="installmentAmount" type="number" step="0.01" min="0.01" placeholder="0,00" defaultValue={debt ? amount(debt.installmentAmountCents) : ''} required /></label>}<label className="form-label">Tipo de cobrança<select value={parsedCount === 1 ? 'single' : 'installments'} onChange={(event) => setInstallmentCount(event.target.value === 'single' ? '1' : String(debt && debt.installmentCount > 1 ? debt.installmentCount : 12))}><option value="single">Valor único</option><option value="installments">Parcelado</option></select></label>{parsedCount === 1 ? <input type="hidden" name="installmentCount" value="1" /> : <label className="form-label">Quantidade de parcelas<input name="installmentCount" type="number" min="2" max="600" step="1" value={installmentCount} onChange={(event) => setInstallmentCount(event.target.value)} required /></label>}</div>
-    <div className="form-two-columns"><label className="form-label">Data de início do contrato<input name="startDate" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label><label className="form-label">{parsedCount === 1 ? 'Data de vencimento' : 'Data da primeira parcela'}<input name="firstDueDate" type="date" value={firstDueDate} onChange={(event) => setFirstDueDate(event.target.value)} required /></label></div>
+    <div className="form-two-columns"><label className="form-label">Data da primeira parcela<input name="firstDueDate" type="date" value={firstDueDate} onChange={(event) => setFirstDueDate(event.target.value)} required /></label><label className="form-label">Data da última parcela<input type="date" value={lastDueDate} readOnly /></label></div>
     <div className="form-two-columns">{parsedCount > 1 && <label className="form-label">Dia de vencimento mensal<input name="dueDay" type="number" min="1" max="31" value={dueDay} onChange={(event) => setDueDay(event.target.value)} required /></label>}<label className="form-label">Juros ao mês (%) · opcional<input name="monthlyInterest" type="number" min="0" step="0.01" placeholder="Não informado" defaultValue={debt?.monthlyInterestBps ? (debt.monthlyInterestBps / 100).toFixed(2) : ''} /></label></div>
     <div className="form-two-columns"><label className="form-label">Taxa anual (%) · opcional<input name="annualInterest" type="number" min="0" step="0.01" placeholder="Não informada" defaultValue={debt?.annualInterestBps ? (debt.annualInterestBps / 100).toFixed(2) : ''} /></label><label className="form-label">CET anual (%) · opcional<input name="cet" type="number" min="0" step="0.01" placeholder="Não informado" defaultValue={debt?.cetBps ? (debt.cetBps / 100).toFixed(2) : ''} /></label></div>
-    {hasSchedulePreview && <div className={`debt-schedule-preview ${startGapMonths > 1 ? 'schedule-warning' : ''}`} role="status">
+    {hasSchedulePreview && <div className="debt-schedule-preview" role="status">
       <strong>Prévia do cronograma</strong>
       <span>{parsedCount === 1 ? `Vencimento único: ${dateLabel(firstDueDate)}` : `Parcela 1: ${dateLabel(firstDueDate)} · Parcela ${parsedCount}: ${dateLabel(lastDueDate)}`}</span>
-      {startGapMonths > 1 && <small>A primeira parcela começa {startGapMonths} meses após o início do contrato. Confirme se essa data está correta.</small>}
     </div>}
     <label className="form-label">Valor de entrada · opcional<input name="downPayment" type="number" min="0" step="0.01" placeholder="0,00" defaultValue={debt ? amount(debt.downPaymentCents) : '0'} /></label>
     {debt?.installments.some((installment) => installment.payments.length > 0) && <p className="form-hint contract-preserve-note">Pagamentos já registrados e os valores das parcelas pagas serão preservados. Alterações serão aplicadas às parcelas sem histórico de pagamento.</p>}
