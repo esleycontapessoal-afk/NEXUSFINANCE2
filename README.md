@@ -69,7 +69,7 @@ Com o monitoramento ativo, o painel mostra e-mails de contas que já acessaram o
 - Cadastro de contas com saldo inicial e saldo atualizado pelos lançamentos associados.
 - Calendário mensal interativo para consultar lançamentos por dia, navegar entre meses e adicionar, editar ou excluir receitas, despesas e compromissos.
 - Compromissos próprios para contas a pagar/receber, faturas, parcelas, investimentos e lembretes, com valor estimado opcional e marcação de conclusão.
-- Cadastro local de dívidas e empréstimos de valor único ou parcelados, com pagamentos parciais, histórico e filtros por status, tipo e saldo.
+- Cadastro local de dívidas e empréstimos de valor único ou parcelados, além de dívidas em atraso com vencimento original, pagamentos parciais, histórico e filtros por status, tipo e saldo.
 - Indicadores de parcelas em aberto, quitadas, atrasadas e vencendo em até 7 dias; lembretes locais configuráveis aparecem no dashboard conforme o vencimento.
 - Campos informativos para valor efetivamente recebido, taxa anual e CET em empréstimos; esses dados não recalculam o contrato.
 - Aba **MEUS OBJETIVOS** com cofrinhos personalizados, metas, depósitos e retiradas vinculados como transferências internas, histórico, gráficos, simulação de rendimento, conquistas, filtros e depósitos recorrentes locais.
