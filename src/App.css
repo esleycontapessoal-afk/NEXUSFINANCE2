@@ -260,3 +260,18 @@ button { border: 0; cursor: pointer; }
 .notebook-editor-footer > span { color: var(--muted); font-size: 8px; }
 @media (max-width: 850px) { .notebook-layout { grid-template-columns: 1fr; }.notebook-note-list { max-height: 230px; } }
 @media (max-width: 640px) { .notebook-editor-footer { align-items: flex-start; flex-direction: column; }.notebook-editor-footer .button { width: 100%; } }
+
+.dashboard-account-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-bottom: 13px; padding: 10px 12px; }
+.dashboard-account-filter-heading { display: inline-flex; align-items: center; gap: 7px; margin-right: 4px; color: var(--muted); font-size: 10px; }
+.dashboard-account-filter-heading svg { color: var(--green); }
+.dashboard-account-option { display: inline-flex; min-height: 28px; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-raised); font-size: 9px; cursor: pointer; }
+.dashboard-account-option:hover,.dashboard-account-option.selected { border-color: #6bdfa84a; color: var(--green); background: #6bdfa80d; }
+.dashboard-account-option input { width: 13px; height: 13px; margin: 0; accent-color: var(--green); }
+.dashboard-account-option input:checked + span { color: var(--green); }
+@media (max-width: 640px) {
+  .dashboard-account-filter { align-items: flex-start; }
+  .dashboard-account-filter-heading { width: 100%; }
+  .dashboard-account-option { max-width: 100%; }
+  .dashboard-account-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .section-title-row .heading-actions { align-items: stretch; flex-wrap: wrap; }
+}

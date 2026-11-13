@@ -68,6 +68,7 @@ type Transaction = {
   category: string
   date: string
   accountId: string
+  transferId?: string
   sourcePaymentId?: string
   sourceGoalMovementId?: string
 }
@@ -269,6 +270,7 @@ function parseAppData(value: unknown): AppData {
       && typeof transaction.category === 'string'
       && isValidDate(transaction.date)
       && typeof transaction.accountId === 'string'
+      && (transaction.transferId === undefined || (typeof transaction.transferId === 'string' && transaction.transferId.length > 0))
       && (transaction.sourcePaymentId === undefined || typeof transaction.sourcePaymentId === 'string')
       && (transaction.sourceGoalMovementId === undefined || typeof transaction.sourceGoalMovementId === 'string')
   })
@@ -354,6 +356,25 @@ function parseAppData(value: unknown): AppData {
   const savingsGoals = data.savingsGoals ?? []
   const storedTransactions = data.transactions ?? []
   const storedAccounts = data.accounts ?? []
+  const bankTransfers = new Map<string, Transaction[]>()
+  for (const transaction of storedTransactions) {
+    if (!transaction || typeof transaction !== 'object' || typeof transaction.transferId !== 'string' || !transaction.transferId) continue
+    const legs = bankTransfers.get(transaction.transferId) ?? []
+    legs.push(transaction)
+    bankTransfers.set(transaction.transferId, legs)
+  }
+  const validBankTransfers = [...bankTransfers.values()].every((legs) => {
+    const outgoing = legs.filter((transaction) => transaction.type === 'transfer-out')
+    const incoming = legs.filter((transaction) => transaction.type === 'transfer-in')
+    return legs.length === 2
+      && outgoing.length === 1
+      && incoming.length === 1
+      && outgoing[0].amountCents === incoming[0].amountCents
+      && outgoing[0].date === incoming[0].date
+      && outgoing[0].accountId !== incoming[0].accountId
+      && legs.every((transaction) => storedAccounts.some((account) => account && typeof account === 'object' && account.id === transaction.accountId))
+      && legs.every((transaction) => !transaction.sourcePaymentId && !transaction.sourceGoalMovementId)
+  })
   const validSavingsGoals = Array.isArray(savingsGoals) && savingsGoals.every((item) => {
     if (!item || typeof item !== 'object') return false
     const goal = item as SavingsGoal
@@ -421,7 +442,8 @@ function parseAppData(value: unknown): AppData {
     && (item.goalId === undefined || savingsGoals.some((goal) => goal.id === item.goalId)),
   )
   const validGoalTransactions = storedTransactions.every((transaction) => {
-    if (!transaction.sourceGoalMovementId) return transaction.type !== 'transfer-in' && transaction.type !== 'transfer-out'
+    if (!transaction.sourceGoalMovementId) return Boolean(transaction.transferId) || (transaction.type !== 'transfer-in' && transaction.type !== 'transfer-out')
+    if (transaction.transferId) return false
     return savingsGoals.flatMap((goal) => goal.movements).filter((movement) =>
       movement.id === transaction.sourceGoalMovementId
       && movement.linkedTransactionId === transaction.id
@@ -443,7 +465,7 @@ function parseAppData(value: unknown): AppData {
   const validReminderDays = Array.isArray(reminderDays)
     && reminderDays.every((day) => Number.isInteger(day) && day >= 0 && day <= 30)
     && new Set(reminderDays).size === reminderDays.length
-  if (!validTransactions || !validAccounts || !validCalendarEvents || !validDebts || !validBills || !validNotes || !validReminderDays || !validSavingsGoals || !validSavingsSchedules || !validSavingsAchievements || !validGoalTransactions) throw new Error('O backup contém registros inválidos. Nenhum dado foi alterado.')
+  if (!validTransactions || !validAccounts || !validBankTransfers || !validCalendarEvents || !validDebts || !validBills || !validNotes || !validReminderDays || !validSavingsGoals || !validSavingsSchedules || !validSavingsAchievements || !validGoalTransactions) throw new Error('O backup contém registros inválidos. Nenhum dado foi alterado.')
   return {
     version: 1,
     theme: data.theme,
@@ -652,6 +674,8 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
   const [billModal, setBillModal] = useState<Bill | 'new' | null>(null)
   const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null)
   const [accountModal, setAccountModal] = useState(false)
+  const [transferModal, setTransferModal] = useState(false)
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[] | null>(null)
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all')
   const [period, setPeriod] = useState('month')
@@ -795,7 +819,6 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
   )
   const incomeThisMonth = monthTransactions.reduce((sum, item) => sum + (item.type === 'income' ? item.amountCents : 0), 0)
   const expenseThisMonth = monthTransactions.reduce((sum, item) => sum + (item.type === 'expense' ? item.amountCents : 0), 0)
-  const availableBalance = (data?.accounts ?? []).reduce((sum, account) => sum + accountBalance(account, data?.transactions ?? []), 0)
   const savingsRate = incomeThisMonth > 0 ? Math.round(((incomeThisMonth - expenseThisMonth) / incomeThisMonth) * 100) : null
   const visibleTransactions = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase('pt-BR')
@@ -824,6 +847,10 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
       return
     }
     const existing = transactionModal !== 'new' && transactionModal ? transactionModal : null
+    if (existing?.transferId) {
+      setToast('Altere ou exclua esta transferência pela aba Bancos.')
+      return
+    }
     if (existing?.sourcePaymentId || existing?.sourceGoalMovementId) {
       setToast('Movimentações vinculadas devem ser alteradas na tela do objetivo ou da obrigação.')
       return
@@ -851,6 +878,62 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
     persist({ ...data, transactions })
     setTransactionModal(null)
     setToast(existing ? 'Lançamento atualizado.' : 'Lançamento adicionado.')
+  }
+
+  const saveTransfer = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!data) return
+    const form = new FormData(event.currentTarget)
+    const sourceAccountId = String(form.get('sourceAccountId') ?? '')
+    const destinationAccountId = String(form.get('destinationAccountId') ?? '')
+    const amount = Number(String(form.get('amount') ?? '').replace(',', '.'))
+    const amountCents = Math.round(amount * 100)
+    const date = String(form.get('date') ?? '')
+    const sourceAccount = data.accounts.find((account) => account.id === sourceAccountId)
+    const destinationAccount = data.accounts.find((account) => account.id === destinationAccountId)
+    if (!sourceAccount || !destinationAccount || sourceAccount.id === destinationAccount.id) {
+      setToast('Selecione dois bancos diferentes para transferir o dinheiro.')
+      return
+    }
+    if (!Number.isFinite(amount) || !Number.isSafeInteger(amountCents) || amountCents <= 0) {
+      setToast('Informe um valor válido maior que zero.')
+      return
+    }
+    if (!isValidDate(date)) {
+      setToast('Informe uma data válida para a transferência.')
+      return
+    }
+    if (accountBalance(sourceAccount, data.transactions) < amountCents) {
+      setToast(`Saldo insuficiente em ${sourceAccount.name}. Disponível: ${money(accountBalance(sourceAccount, data.transactions))}.`)
+      return
+    }
+    const transferId = crypto.randomUUID()
+    const category = 'Transferência entre bancos'
+    const transferTransactions: Transaction[] = [
+      {
+        id: crypto.randomUUID(),
+        transferId,
+        description: `Transferência para ${destinationAccount.name}`,
+        amountCents,
+        type: 'transfer-out',
+        category,
+        date,
+        accountId: sourceAccount.id,
+      },
+      {
+        id: crypto.randomUUID(),
+        transferId,
+        description: `Transferência de ${sourceAccount.name}`,
+        amountCents,
+        type: 'transfer-in',
+        category,
+        date,
+        accountId: destinationAccount.id,
+      },
+    ]
+    persist({ ...data, transactions: [...transferTransactions, ...data.transactions] })
+    setTransferModal(false)
+    setToast(`Transferência de ${sourceAccount.name} para ${destinationAccount.name} registrada.`)
   }
 
   const saveCalendarEvent = (event: FormEvent<HTMLFormElement>) => {
@@ -1171,6 +1254,21 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
 
   const removeTransaction = (transaction: Transaction) => {
     if (!data) return
+    if (transaction.transferId) {
+      const transferLegs = data.transactions.filter((item) => item.transferId === transaction.transferId)
+      const hasPair = transferLegs.length === 2
+        && transferLegs.some((item) => item.type === 'transfer-in')
+        && transferLegs.some((item) => item.type === 'transfer-out')
+      if (!hasPair) {
+        setToast('Não foi possível localizar os dois registros desta transferência; os lançamentos foram mantidos.')
+        setDeleteTarget(null)
+        return
+      }
+      persist({ ...data, transactions: data.transactions.filter((item) => item.transferId !== transaction.transferId) })
+      setDeleteTarget(null)
+      setToast('Transferência excluída dos dois bancos.')
+      return
+    }
     if (transaction.sourceGoalMovementId) {
       const matches = data.savingsGoals.flatMap((goal) => goal.movements
         .filter((movement) => movement.id === transaction.sourceGoalMovementId)
@@ -1418,10 +1516,12 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
           {page === 'dashboard' && (
             <Dashboard
               data={data}
+              accounts={data.accounts}
               monthTransactions={monthTransactions}
               income={incomeThisMonth}
               expense={expenseThisMonth}
-              balance={availableBalance}
+              selectedAccountIds={selectedAccountIds}
+              onSelectedAccountIdsChange={setSelectedAccountIds}
               savingsRate={savingsRate}
               onAdd={() => setTransactionModal('new')}
               onNavigate={setPage}
@@ -1431,7 +1531,7 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
               now={now}
               onPay={openPayment}
               onEdit={(transaction) => {
-                if (!transaction.sourcePaymentId && !transaction.sourceGoalMovementId) setTransactionModal(transaction)
+                if (!transaction.sourcePaymentId && !transaction.sourceGoalMovementId && !transaction.transferId) setTransactionModal(transaction)
               }}
             />
           )}
@@ -1446,14 +1546,14 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
               onTypeFilterChange={setTypeFilter}
               onAdd={() => setTransactionModal('new')}
               onEdit={(transaction) => {
-                if (!transaction.sourcePaymentId && !transaction.sourceGoalMovementId) setTransactionModal(transaction)
+                if (!transaction.sourcePaymentId && !transaction.sourceGoalMovementId && !transaction.transferId) setTransactionModal(transaction)
               }}
               onDelete={setDeleteTarget}
             />
           )}
 
           {page === 'accounts' && (
-            <AccountsPage accounts={data.accounts} transactions={data.transactions} onAdd={() => setAccountModal(true)} onDelete={removeAccount} />
+            <AccountsPage accounts={data.accounts} transactions={data.transactions} onAdd={() => setAccountModal(true)} onTransfer={() => setTransferModal(true)} onDelete={removeAccount} />
           )}
 
           {page === 'calendar' && (
@@ -1472,7 +1572,7 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
                 setCalendarEventModal('new')
               }}
               onEdit={(transaction) => {
-                if (!transaction.sourcePaymentId && !transaction.sourceGoalMovementId) setTransactionModal(transaction)
+                if (!transaction.sourcePaymentId && !transaction.sourceGoalMovementId && !transaction.transferId) setTransactionModal(transaction)
               }}
               onDelete={setDeleteTarget}
               onEditEvent={(calendarEvent) => setCalendarEventModal(calendarEvent)}
@@ -1578,15 +1678,18 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
       {debtModal && <DebtDialog debt={debtModal === 'new' ? null : debtModal} onClose={() => setDebtModal(null)} onSubmit={saveDebt} />}
       {billModal && <BillDialog bill={billModal === 'new' ? null : billModal} accounts={data.accounts} onClose={() => setBillModal(null)} onSubmit={saveBill} />}
       {accountModal && <AccountDialog onClose={() => setAccountModal(false)} onSubmit={createAccount} />}
+      {transferModal && <TransferDialog accounts={data.accounts} transactions={data.transactions} onClose={() => setTransferModal(false)} onSubmit={saveTransfer} />}
       {deleteTarget && (
         <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteTarget(null) }}>
           <div className="confirm-card" role="dialog" aria-modal="true" aria-labelledby="delete-title">
             <div className="dialog-icon danger-icon"><Trash2 size={20} /></div>
-            <h2 id="delete-title">Excluir lançamento?</h2>
-            <p>{deleteTarget.sourcePaymentId
+            <h2 id="delete-title">{deleteTarget.transferId ? 'Excluir transferência?' : 'Excluir lançamento?'}</h2>
+            <p>{deleteTarget.transferId
+              ? `“${deleteTarget.description}” será removida dos dois bancos e do histórico de transferências.`
+              : deleteTarget.sourcePaymentId
               ? `“${deleteTarget.description}” será removido do histórico e o pagamento associado será desfeito na obrigação.`
               : `“${deleteTarget.description}” será removido permanentemente deste navegador.`}</p>
-            <div className="dialog-actions"><button className="button button-secondary" onClick={() => setDeleteTarget(null)}>Cancelar</button><button className="button button-danger" onClick={() => removeTransaction(deleteTarget)}>{deleteTarget.sourcePaymentId ? 'Excluir pagamento' : 'Excluir lançamento'}</button></div>
+            <div className="dialog-actions"><button className="button button-secondary" onClick={() => setDeleteTarget(null)}>Cancelar</button><button className="button button-danger" onClick={() => removeTransaction(deleteTarget)}>{deleteTarget.transferId ? 'Excluir transferência' : deleteTarget.sourcePaymentId ? 'Excluir pagamento' : 'Excluir lançamento'}</button></div>
           </div>
         </div>
       )}
@@ -1640,10 +1743,12 @@ const descriptions: Record<Page, string> = {
 
 function Dashboard({
   data,
+  accounts,
   monthTransactions,
   income,
   expense,
-  balance,
+  selectedAccountIds,
+  onSelectedAccountIdsChange,
   savingsRate,
   onAdd,
   onNavigate,
@@ -1655,10 +1760,12 @@ function Dashboard({
   onEdit,
 }: {
   data: AppData
+  accounts: Account[]
   monthTransactions: Transaction[]
   income: number
   expense: number
-  balance: number
+  selectedAccountIds: string[] | null
+  onSelectedAccountIdsChange: (accountIds: string[] | null) => void
   savingsRate: number | null
   onAdd: () => void
   onNavigate: (page: Page) => void
@@ -1678,11 +1785,37 @@ function Dashboard({
     }, {})
   const topCategories = Object.entries(categories).sort((a, b) => b[1] - a[1]).slice(0, 5)
   const hasData = data.transactions.length > 0 || data.accounts.length > 0 || data.debts.length > 0 || data.bills.length > 0 || data.savingsGoals.length > 0
+  const displayedAccounts = accounts.filter((account) => selectedAccountIds === null || selectedAccountIds.includes(account.id))
+  const balance = displayedAccounts.reduce((total, account) => total + accountBalance(account, data.transactions), 0)
+  const allAccountsSelected = displayedAccounts.length === accounts.length
+  const balanceLabel = displayedAccounts.length === 1
+    ? `Saldo · ${displayedAccounts[0].name}`
+    : displayedAccounts.length === 0
+      ? 'Saldo selecionado'
+      : displayedAccounts.length === accounts.length
+        ? 'Saldo total nas contas'
+        : `Saldo em ${displayedAccounts.length} bancos`
 
   return (
     <>
+      {accounts.length > 0 && <div className="dashboard-account-filter panel" role="group" aria-label="Filtrar saldo por banco">
+        <div className="dashboard-account-filter-heading"><Wallet size={16} /><span>Exibir saldo de</span></div>
+        <button type="button" className={`dashboard-account-option ${allAccountsSelected ? 'selected' : ''}`} onClick={() => onSelectedAccountIdsChange(null)}>Todos os bancos</button>
+        {accounts.map((account) => {
+          const checked = selectedAccountIds === null || selectedAccountIds.includes(account.id)
+          return <label className="dashboard-account-option" key={account.id}>
+            <input type="checkbox" checked={checked} onChange={(event) => {
+              const next = new Set(selectedAccountIds ?? accounts.map((item) => item.id))
+              if (event.currentTarget.checked) next.add(account.id)
+              else next.delete(account.id)
+              onSelectedAccountIdsChange([...next])
+            }} />
+            <span>{account.name}</span>
+          </label>
+        })}
+      </div>}
       <div className="summary-grid">
-        <SummaryCard icon={Wallet} label="Saldo total nas contas" value={money(balance)} note={`${data.accounts.length} ${data.accounts.length === 1 ? 'conta cadastrada' : 'contas cadastradas'}`} tone="green" />
+        <SummaryCard icon={Wallet} label={balanceLabel} value={money(balance)} note={`${displayedAccounts.length} ${displayedAccounts.length === 1 ? 'conta selecionada' : 'contas selecionadas'}`} tone="green" />
         <SummaryCard icon={ArrowDownLeft} label="Receitas do mês" value={money(income)} note={`${monthTransactions.filter((item) => item.type === 'income').length} recebimentos`} tone="blue" />
         <SummaryCard icon={ArrowUpRight} label="Despesas do mês" value={money(expense)} note={`${monthTransactions.filter((item) => item.type === 'expense').length} despesas`} tone="red" />
         <SummaryCard icon={TrendingUp} label="Economia do mês" value={savingsRate === null ? '—' : `${savingsRate}%`} note={savingsRate === null ? 'Cadastre receitas para calcular' : money(income - expense)} tone="violet" />
@@ -1879,7 +2012,7 @@ function TransactionTable({ transactions, accounts, onEdit, onDelete, compact = 
   return <div className={`transaction-rows ${compact ? 'compact-rows' : ''}`}>{transactions.map((transaction) => {
     const internalTransfer = transaction.type === 'transfer-in' || transaction.type === 'transfer-out'
     const incoming = transaction.type === 'income' || transaction.type === 'transfer-in'
-    const linked = Boolean(transaction.sourcePaymentId || transaction.sourceGoalMovementId)
+    const linked = Boolean(transaction.sourcePaymentId || transaction.sourceGoalMovementId || transaction.transferId)
     const Icon = internalTransfer ? ArrowLeftRight : incoming ? ArrowDownLeft : ArrowUpRight
     const account = accounts.find((item) => item.id === transaction.accountId)
     return <div className="transaction-row" key={transaction.id}>
@@ -1887,7 +2020,7 @@ function TransactionTable({ transactions, accounts, onEdit, onDelete, compact = 
         ? <span className={`transaction-symbol ${internalTransfer ? 'transfer-symbol' : incoming ? 'income-symbol' : 'expense-symbol'}`} aria-hidden="true"><Icon size={16} /></span>
         : <button className={`transaction-symbol ${internalTransfer ? 'transfer-symbol' : incoming ? 'income-symbol' : 'expense-symbol'}`} onClick={() => onEdit(transaction)} aria-label={`Editar ${transaction.description}`}><Icon size={16} /></button>}
       {linked
-        ? <span className="transaction-description"><strong>{transaction.description}</strong><span>{transaction.sourceGoalMovementId ? 'Movimentação vinculada a objetivo' : 'Pagamento vinculado'}</span></span>
+        ? <span className="transaction-description"><strong>{transaction.description}</strong><span>{transaction.transferId ? 'Transferência entre bancos' : transaction.sourceGoalMovementId ? 'Movimentação vinculada a objetivo' : 'Pagamento vinculado'}</span></span>
         : <button className="transaction-description" onClick={() => onEdit(transaction)}><strong>{transaction.description}</strong><span>{internalTransfer ? 'Transferência interna' : incoming ? 'Receita' : 'Despesa'}</span></button>}
       <span className="transaction-category"><i className={`category-mini ${internalTransfer ? 'transfer-mini' : incoming ? 'income-mini' : 'expense-mini'}`} />{transaction.category}</span>
       <span className="transaction-date">{dateLabel(transaction.date)}</span>
@@ -1898,19 +2031,19 @@ function TransactionTable({ transactions, accounts, onEdit, onDelete, compact = 
         {!compact && <button
           className="icon-button small-icon delete-row"
           onClick={() => onDelete(transaction)}
-          title={transaction.sourcePaymentId ? 'Excluir pagamento e atualizar obrigação' : 'Excluir lançamento'}
-          aria-label={transaction.sourcePaymentId ? `Excluir pagamento de ${transaction.description}` : `Excluir lançamento ${transaction.description}`}
+          title={transaction.transferId ? 'Excluir transferência dos dois bancos' : transaction.sourcePaymentId ? 'Excluir pagamento e atualizar obrigação' : 'Excluir lançamento'}
+          aria-label={transaction.transferId ? `Excluir transferência ${transaction.description}` : transaction.sourcePaymentId ? `Excluir pagamento de ${transaction.description}` : `Excluir lançamento ${transaction.description}`}
         ><Trash2 size={15} /></button>}
       </div>
     </div>
   })}</div>
 }
 
-function AccountsPage({ accounts, transactions, onAdd, onDelete }: { accounts: Account[]; transactions: Transaction[]; onAdd: () => void; onDelete: (account: Account) => void }) {
+function AccountsPage({ accounts, transactions, onAdd, onTransfer, onDelete }: { accounts: Account[]; transactions: Transaction[]; onAdd: () => void; onTransfer: () => void; onDelete: (account: Account) => void }) {
   return (
     <>
       <div className="account-summary panel"><div><span>Saldo consolidado</span><strong>{money(accounts.reduce((total, account) => total + accountBalance(account, transactions), 0))}</strong><small>Soma dos saldos iniciais e lançamentos vinculados</small></div><div className="account-summary-icon"><Banknote size={22} /></div></div>
-      <div className="section-title-row"><div><h2>Bancos cadastrados</h2><p>Os saldos são atualizados conforme os lançamentos.</p></div><button className="button button-secondary" onClick={onAdd}><Plus size={15} /> Adicionar banco</button></div>
+      <div className="section-title-row"><div><h2>Bancos cadastrados</h2><p>Os saldos são atualizados conforme os lançamentos.</p></div><div className="heading-actions">{accounts.length > 1 && <button className="button button-secondary" onClick={onTransfer}><ArrowLeftRight size={15} /> Transferir entre bancos</button>}<button className="button button-secondary" onClick={onAdd}><Plus size={15} /> Adicionar banco</button></div></div>
       {accounts.length === 0 ? <div className="panel table-empty accounts-empty"><div className="empty-ring"><Wallet size={19} /></div><strong>Nenhum banco cadastrado</strong><span>Adicione seus bancos para acompanhar os saldos consolidados.</span><button className="button button-primary" onClick={onAdd}><Plus size={15} /> Adicionar banco</button></div> : (
         <div className="account-grid">{accounts.map((account) => {
           const typeLabel = accountTypes.find((type) => type.value === account.type)?.label ?? 'Conta'
@@ -1918,7 +2051,7 @@ function AccountsPage({ accounts, transactions, onAdd, onDelete }: { accounts: A
           return <article className="account-card panel" key={account.id}><div className="account-card-top"><span className="account-icon" style={{ color: account.color, background: `${account.color}19` }}><Wallet size={19} /></span><button className="icon-button small-icon" onClick={() => onDelete(account)} title="Remover conta"><Trash2 size={15} /></button></div><span className="account-type">{typeLabel}</span><h3>{account.name}</h3><strong className="account-balance">{money(accountBalance(account, transactions))}</strong><div className="account-card-bottom"><span>Saldo inicial: {money(account.openingBalanceCents)}</span><span>{count} {count === 1 ? 'lançamento' : 'lançamentos'}</span></div></article>
         })}</div>
       )}
-      <p className="data-disclaimer"><CircleHelp size={14} /> Transferências entre contas ainda não são suportadas nesta versão. Para evitar distorções, registre somente entradas e saídas reais.</p>
+      <p className="data-disclaimer"><CircleHelp size={14} /> Transferências internas atualizam os dois bancos sem alterar receitas, despesas ou o saldo consolidado.</p>
     </>
   )
 }
@@ -2744,6 +2877,29 @@ function AccountDialog({ onClose, onSubmit }: { onClose: () => void; onSubmit: (
     <label className="form-label">Cor de identificação<input name="color" type="color" className="color-input" defaultValue="#5ee1a0" /></label>
     <p className="form-hint">O saldo inicial é combinado com os lançamentos vinculados a esta conta. Informe valores reais; não conectamos automaticamente a bancos.</p>
     <div className="dialog-actions"><button type="button" className="button button-secondary" onClick={onClose}>Cancelar</button><button type="submit" className="button button-primary"><Check size={16} /> Criar conta</button></div>
+  </form></div>
+}
+
+function TransferDialog({ accounts, transactions, onClose, onSubmit }: {
+  accounts: Account[]
+  transactions: Transaction[]
+  onClose: () => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}) {
+  const [sourceAccountId, setSourceAccountId] = useState(accounts[0]?.id ?? '')
+  const [destinationAccountId, setDestinationAccountId] = useState(accounts[1]?.id ?? '')
+  const sourceAccount = accounts.find((account) => account.id === sourceAccountId)
+  const sourceBalance = sourceAccount ? accountBalance(sourceAccount, transactions) : 0
+  return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><form className="form-dialog transfer-form" onSubmit={onSubmit} role="dialog" aria-modal="true" aria-labelledby="transfer-dialog-title">
+    <div className="dialog-header"><div><div className="eyebrow">MOVIMENTAÇÃO ENTRE CONTAS</div><h2 id="transfer-dialog-title">Transferir entre bancos</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><X size={18} /></button></div>
+    <div className="form-two-columns">
+      <label className="form-label">Banco de origem<select name="sourceAccountId" value={sourceAccountId} onChange={(event) => setSourceAccountId(event.target.value)} required>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+      <label className="form-label">Banco de destino<select name="destinationAccountId" value={destinationAccountId} onChange={(event) => setDestinationAccountId(event.target.value)} required>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+    </div>
+    <label className="form-label">Valor da transferência<div className="amount-input"><span>R$</span><input name="amount" type="number" step="0.01" min="0.01" placeholder="0,00" required /></div><small className="form-hint">Disponível em {sourceAccount?.name ?? 'origem'}: {money(sourceBalance)}. Não é permitido transferir mais do que o saldo disponível.</small></label>
+    <label className="form-label">Data da transferência<input name="date" type="date" defaultValue={todayString()} required /></label>
+    <p className="form-hint">A movimentação será registrada nos dois bancos e não altera as receitas ou despesas do mês.</p>
+    <div className="dialog-actions"><button type="button" className="button button-secondary" onClick={onClose}>Cancelar</button><button type="submit" className="button button-primary"><ArrowLeftRight size={16} /> Confirmar transferência</button></div>
   </form></div>
 }
 
