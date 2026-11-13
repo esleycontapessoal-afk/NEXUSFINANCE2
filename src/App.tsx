@@ -17,6 +17,8 @@ import {
   CreditCard,
   Download,
   Ellipsis,
+  Eye,
+  EyeOff,
   FileText,
   LayoutDashboard,
   ListFilter,
@@ -190,6 +192,7 @@ type FinanceAppProps = {
 type Page = 'dashboard' | 'transactions' | 'accounts' | 'calendar' | 'obligations' | 'notes' | 'savings' | 'reports' | 'settings' | 'admin'
 
 const STORAGE_KEY = 'nexus-finance-data-v1'
+const DASHBOARD_PREFERENCES_KEY = 'nexus-finance-dashboard-preferences-v1'
 const defaultReminderDays = [7, 3, 1, 0]
 const reminderOptions = [
   { days: 7, label: '7 dias antes' },
@@ -513,6 +516,31 @@ function readData(): AppData {
   return parseAppData(JSON.parse(stored) as unknown)
 }
 
+type DashboardPreferences = {
+  selectedAccountIds: string[] | null
+  hideBalance: boolean
+}
+
+function readDashboardPreferences(key: string): DashboardPreferences {
+  try {
+    const stored = localStorage.getItem(key)
+    if (!stored) return { selectedAccountIds: null, hideBalance: false }
+    const parsed: unknown = JSON.parse(stored)
+    if (!parsed || typeof parsed !== 'object') return { selectedAccountIds: null, hideBalance: false }
+    const preferences = parsed as Partial<DashboardPreferences>
+    return {
+      selectedAccountIds: preferences.selectedAccountIds === null
+        ? null
+        : Array.isArray(preferences.selectedAccountIds) && preferences.selectedAccountIds.every((id) => typeof id === 'string')
+          ? preferences.selectedAccountIds
+          : null,
+      hideBalance: preferences.hideBalance === true,
+    }
+  } catch {
+    return { selectedAccountIds: null, hideBalance: false }
+  }
+}
+
 function todayString() {
   const today = new Date()
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
@@ -665,6 +693,8 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
   })
   const [data, setData] = useState<AppData | null>(initial.data)
   const [storageError, setStorageError] = useState(initial.error)
+  const dashboardPreferencesKey = `${DASHBOARD_PREFERENCES_KEY}${cloudUser ? `:${cloudUser}` : ''}`
+  const [dashboardPreferences, setDashboardPreferences] = useState(() => readDashboardPreferences(dashboardPreferencesKey))
   const [page, setPage] = useState<Page>('dashboard')
   const [transactionModal, setTransactionModal] = useState<Transaction | 'new' | null>(null)
   const [newTransactionDate, setNewTransactionDate] = useState(todayString)
@@ -675,7 +705,6 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
   const [paymentTarget, setPaymentTarget] = useState<PaymentTarget | null>(null)
   const [accountModal, setAccountModal] = useState(false)
   const [transferModal, setTransferModal] = useState(false)
-  const [selectedAccountIds, setSelectedAccountIds] = useState<string[] | null>(null)
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all')
   const [period, setPeriod] = useState('month')
@@ -701,6 +730,16 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
   useEffect(() => {
     document.documentElement.dataset.theme = data?.theme ?? 'dark'
   }, [data?.theme])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(dashboardPreferencesKey, JSON.stringify(dashboardPreferences))
+    } catch (error) {
+      setStorageError(error instanceof Error
+        ? `Não foi possível salvar as preferências do dashboard: ${error.message}`
+        : 'Não foi possível salvar as preferências do dashboard.')
+    }
+  }, [dashboardPreferences, dashboardPreferencesKey])
 
   const persist = (next: AppData) => {
     setData(next)
@@ -1352,6 +1391,14 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
     }
     if (!window.confirm(`Remover a conta “${account.name}”?`)) return
     persist({ ...data, accounts: data.accounts.filter((item) => item.id !== account.id) })
+    setDashboardPreferences((current) => {
+      if (current.selectedAccountIds === null || !current.selectedAccountIds.includes(account.id)) return current
+      const selectedAccountIds = current.selectedAccountIds.filter((id) => id !== account.id)
+      return {
+        ...current,
+        selectedAccountIds: selectedAccountIds.length === 0 ? null : selectedAccountIds,
+      }
+    })
     setToast('Conta removida.')
   }
 
@@ -1520,8 +1567,10 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
               monthTransactions={monthTransactions}
               income={incomeThisMonth}
               expense={expenseThisMonth}
-              selectedAccountIds={selectedAccountIds}
-              onSelectedAccountIdsChange={setSelectedAccountIds}
+              selectedAccountIds={dashboardPreferences.selectedAccountIds}
+              onSelectedAccountIdsChange={(selectedAccountIds) => setDashboardPreferences((current) => ({ ...current, selectedAccountIds }))}
+              hideBalance={dashboardPreferences.hideBalance}
+              onHideBalanceChange={(hideBalance) => setDashboardPreferences((current) => ({ ...current, hideBalance }))}
               savingsRate={savingsRate}
               onAdd={() => setTransactionModal('new')}
               onNavigate={setPage}
@@ -1749,6 +1798,8 @@ function Dashboard({
   expense,
   selectedAccountIds,
   onSelectedAccountIdsChange,
+  hideBalance,
+  onHideBalanceChange,
   savingsRate,
   onAdd,
   onNavigate,
@@ -1766,6 +1817,8 @@ function Dashboard({
   expense: number
   selectedAccountIds: string[] | null
   onSelectedAccountIdsChange: (accountIds: string[] | null) => void
+  hideBalance: boolean
+  onHideBalanceChange: (hideBalance: boolean) => void
   savingsRate: number | null
   onAdd: () => void
   onNavigate: (page: Page) => void
@@ -1813,18 +1866,28 @@ function Dashboard({
             <span>{account.name}</span>
           </label>
         })}
+        <button
+          type="button"
+          className="button button-secondary dashboard-account-privacy"
+          onClick={() => onHideBalanceChange(!hideBalance)}
+          aria-label={hideBalance ? 'Mostrar saldos do dashboard' : 'Ocultar saldos do dashboard'}
+          title={hideBalance ? 'Mostrar saldos do dashboard' : 'Ocultar saldos do dashboard'}
+        >
+          {hideBalance ? <Eye size={15} /> : <EyeOff size={15} />}
+          {hideBalance ? 'Mostrar saldos' : 'Ocultar saldos'}
+        </button>
       </div>}
       <div className="summary-grid">
-        <SummaryCard icon={Wallet} label={balanceLabel} value={money(balance)} note={`${displayedAccounts.length} ${displayedAccounts.length === 1 ? 'conta selecionada' : 'contas selecionadas'}`} tone="green" />
+        <SummaryCard icon={Wallet} label={balanceLabel} value={hideBalance ? '••••••' : money(balance)} note={`${displayedAccounts.length} ${displayedAccounts.length === 1 ? 'conta selecionada' : 'contas selecionadas'}`} tone="green" />
         <SummaryCard icon={ArrowDownLeft} label="Receitas do mês" value={money(income)} note={`${monthTransactions.filter((item) => item.type === 'income').length} recebimentos`} tone="blue" />
         <SummaryCard icon={ArrowUpRight} label="Despesas do mês" value={money(expense)} note={`${monthTransactions.filter((item) => item.type === 'expense').length} despesas`} tone="red" />
         <SummaryCard icon={TrendingUp} label="Economia do mês" value={savingsRate === null ? '—' : `${savingsRate}%`} note={savingsRate === null ? 'Cadastre receitas para calcular' : money(income - expense)} tone="violet" />
       </div>
       <button className="dashboard-savings-strip panel" onClick={() => onNavigate('savings')}>
         <span className="savings-strip-icon"><Target size={17} /></span>
-        <span><small>Disponível nos bancos</small><strong>{money(balance)}</strong></span>
-        <span><small>Reservado nos objetivos</small><strong>{money(data.savingsGoals.reduce((sum, goal) => sum + savingsBalance(goal), 0))}</strong></span>
-        <span><small>Total acompanhado</small><strong>{money(balance + data.savingsGoals.reduce((sum, goal) => sum + savingsBalance(goal), 0))}</strong></span>
+        <span><small>Disponível nos bancos</small><strong>{hideBalance ? '••••••' : money(balance)}</strong></span>
+        <span><small>Reservado nos objetivos</small><strong>{hideBalance ? '••••••' : money(data.savingsGoals.reduce((sum, goal) => sum + savingsBalance(goal), 0))}</strong></span>
+        <span><small>Total acompanhado</small><strong>{hideBalance ? '••••••' : money(balance + data.savingsGoals.reduce((sum, goal) => sum + savingsBalance(goal), 0))}</strong></span>
         <span className="text-button">MEUS OBJETIVOS <ArrowUpRight size={14} /></span>
       </button>
       {!hasData && (

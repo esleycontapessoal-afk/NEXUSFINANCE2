@@ -268,10 +268,12 @@ button { border: 0; cursor: pointer; }
 .dashboard-account-option:hover,.dashboard-account-option.selected { border-color: #6bdfa84a; color: var(--green); background: #6bdfa80d; }
 .dashboard-account-option input { width: 13px; height: 13px; margin: 0; accent-color: var(--green); }
 .dashboard-account-option input:checked + span { color: var(--green); }
+.dashboard-account-privacy { min-height: 28px; margin-left: auto; padding: 0 9px; font-size: 9px; }
 @media (max-width: 640px) {
   .dashboard-account-filter { align-items: flex-start; }
   .dashboard-account-filter-heading { width: 100%; }
   .dashboard-account-option { max-width: 100%; }
   .dashboard-account-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dashboard-account-privacy { margin-left: 0; }
   .section-title-row .heading-actions { align-items: stretch; flex-wrap: wrap; }
 }

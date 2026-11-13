@@ -67,6 +67,7 @@ Com o monitoramento ativo, o painel mostra e-mails de contas que já acessaram o
 - Dashboard com saldo das contas, receitas e despesas do mês, economia e distribuição de gastos.
 - Cadastro, edição, busca, filtro e exclusão de lançamentos.
 - Cadastro de contas com saldo inicial e saldo atualizado pelos lançamentos associados.
+- Filtro de saldos do dashboard por banco, com preferência salva neste navegador e opção para ocultar os valores.
 - Transferências entre bancos com débito e crédito vinculados, além de filtro na visão geral para exibir um banco, vários ou todos.
 - Calendário mensal interativo para consultar lançamentos por dia, navegar entre meses e adicionar, editar ou excluir receitas, despesas e compromissos.
 - Compromissos próprios para contas a pagar/receber, faturas, parcelas, investimentos e lembretes, com valor estimado opcional e marcação de conclusão.
