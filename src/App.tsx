@@ -731,6 +731,12 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
   const [now, setNow] = useState(() => new Date())
 
   useEffect(() => {
+    if (!cloudUser || !initialData || initialData === data) return
+    setData(initialData)
+    setDashboardPreferences(initialData.dashboardPreferences ?? readDashboardPreferences(dashboardPreferencesKey))
+  }, [cloudUser, data, dashboardPreferencesKey, initialData])
+
+  useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000)
     return () => window.clearInterval(timer)
   }, [])
@@ -3242,6 +3248,60 @@ function CloudApp({ client }: { client: SupabaseClient }) {
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [client, user])
+
+  const hasLoadedCloudData = cloudData !== null
+
+  useEffect(() => {
+    if (!user || !hasLoadedCloudData) return
+    let active = true
+    let refreshing = false
+    const userId = user.id
+    const refreshCloudData = async () => {
+      if (!active || refreshing || document.visibilityState !== 'visible' || syncStatus !== 'NUVEM') return
+      refreshing = true
+      try {
+        const { data: row, error } = await client
+          .from('user_finance_data')
+          .select('data')
+          .eq('user_id', userId)
+          .maybeSingle()
+        if (error) throw new Error(error.message)
+        if (!active || !row) return
+        const parsed = parseAppData(row.data)
+        let cacheErrorMessage = ''
+        if (JSON.stringify(parsed) !== JSON.stringify(cloudData)) {
+          try {
+            localStorage.setItem(`${STORAGE_KEY}:${userId}`, JSON.stringify(parsed))
+          } catch (cacheError) {
+            cacheErrorMessage = cacheError instanceof Error
+              ? `Os dados foram atualizados, mas o cache local não pôde ser salvo: ${cacheError.message}`
+              : 'Os dados foram atualizados, mas o cache local não pôde ser salvo.'
+          }
+          setCloudData(parsed)
+        }
+        setSyncStatus('NUVEM')
+        setSyncError(cacheErrorMessage)
+      } catch (error) {
+        if (!active) return
+        setSyncStatus('OFFLINE')
+        setSyncError(error instanceof Error
+          ? `Não foi possível atualizar os dados da nuvem. ${error.message}`
+          : 'Não foi possível atualizar os dados da nuvem.')
+      } finally {
+        refreshing = false
+      }
+    }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refreshCloudData()
+    }
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      active = false
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [client, cloudData, hasLoadedCloudData, syncStatus, user])
 
   const writeCloudData = async (userId: string, value: AppData) => {
     const { error } = await client.from('user_finance_data').upsert({
