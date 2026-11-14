@@ -67,7 +67,7 @@ Com o monitoramento ativo, o painel mostra e-mails de contas que já acessaram o
 - Dashboard com saldo das contas, receitas e despesas do mês, economia e distribuição de gastos.
 - Cadastro, edição, busca, filtro e exclusão de lançamentos.
 - Cadastro de contas com saldo inicial e saldo atualizado pelos lançamentos associados.
-- Filtro de saldos do dashboard por banco, com preferência salva neste navegador e opção para ocultar os valores.
+- Filtro de saldos do dashboard por banco e opção para ocultar os valores; no modo Supabase, essas preferências sincronizam com a conta.
 - Transferências entre bancos com débito e crédito vinculados, além de filtro na visão geral para exibir um banco, vários ou todos.
 - Calendário mensal interativo para consultar lançamentos por dia, navegar entre meses e adicionar, editar ou excluir receitas, despesas e compromissos.
 - Compromissos próprios para contas a pagar/receber, faturas, parcelas, investimentos e lembretes, com valor estimado opcional e marcação de conclusão.
@@ -88,6 +88,6 @@ Não são criados lançamentos ou contas de demonstração. Os saldos começam z
 
 ## Limitações e privacidade
 
-No modo local, os dados podem ser apagados ao limpar o armazenamento do navegador; exporte backups regularmente. No modo Supabase, os dados financeiros ficam em um documento JSONB por usuário autenticado, protegido por RLS; as alterações são sincronizadas automaticamente e o app informa falhas de sincronização. O cache no navegador serve somente para recuperação offline, não sincroniza alterações offline entre dispositivos nem resolve edições simultâneas de forma colaborativa. Mantenha backups JSON mesmo no modo nuvem.
+No modo local, os dados podem ser apagados ao limpar o armazenamento do navegador; exporte backups regularmente. No modo Supabase, os dados financeiros e as preferências do dashboard ficam em um documento JSONB por usuário autenticado, protegido por RLS; as alterações são sincronizadas automaticamente e o app informa falhas de sincronização. O cache no navegador serve somente para recuperação offline, não sincroniza alterações offline entre dispositivos nem resolve edições simultâneas de forma colaborativa. Mantenha backups JSON mesmo no modo nuvem.
 
 Os lembretes são exibidos somente dentro do dashboard enquanto a aplicação está aberta; os depósitos recorrentes dos objetivos também são registros internos processados apenas com o app aberto e saldo suficiente, não transferências bancárias reais. Não há notificações push ou em segundo plano ou integração com cartões/bancos. A amortização antecipada com recálculo automático de juros, prazo ou valor das parcelas ainda não é oferecida; pagamentos registrados seguem o cronograma cadastrado e os termos do credor devem ser confirmados antes de alterar contratos.

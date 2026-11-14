@@ -163,6 +163,10 @@ type NotebookNote = {
   content: string
   updatedAt: string
 }
+type DashboardPreferences = {
+  selectedAccountIds: string[] | null
+  hideBalance: boolean
+}
 type AppData = {
   version: 1
   theme: 'dark' | 'light'
@@ -173,6 +177,7 @@ type AppData = {
   accounts: Account[]
   notes?: NotebookNote[]
   reminderDays?: number[]
+  dashboardPreferences?: DashboardPreferences
   savingsGoals: SavingsGoal[]
   savingsSchedules: SavingsSchedule[]
   savingsAchievements: SavingsAchievement[]
@@ -242,6 +247,7 @@ function emptyData(): AppData {
     accounts: [],
     notes: [],
     reminderDays: defaultReminderDays,
+    dashboardPreferences: { selectedAccountIds: null, hideBalance: false },
     savingsGoals: [],
     savingsSchedules: [],
     savingsAchievements: [],
@@ -468,7 +474,16 @@ function parseAppData(value: unknown): AppData {
   const validReminderDays = Array.isArray(reminderDays)
     && reminderDays.every((day) => Number.isInteger(day) && day >= 0 && day <= 30)
     && new Set(reminderDays).size === reminderDays.length
-  if (!validTransactions || !validAccounts || !validBankTransfers || !validCalendarEvents || !validDebts || !validBills || !validNotes || !validReminderDays || !validSavingsGoals || !validSavingsSchedules || !validSavingsAchievements || !validGoalTransactions) throw new Error('O backup contém registros inválidos. Nenhum dado foi alterado.')
+  const dashboardPreferences = data.dashboardPreferences
+  const validDashboardPreferences = dashboardPreferences === undefined || (
+    dashboardPreferences !== null
+    && typeof dashboardPreferences === 'object'
+    && (dashboardPreferences.selectedAccountIds === null
+      || (Array.isArray(dashboardPreferences.selectedAccountIds)
+        && dashboardPreferences.selectedAccountIds.every((id) => typeof id === 'string')))
+    && typeof dashboardPreferences.hideBalance === 'boolean'
+  )
+  if (!validTransactions || !validAccounts || !validBankTransfers || !validCalendarEvents || !validDebts || !validBills || !validNotes || !validReminderDays || !validDashboardPreferences || !validSavingsGoals || !validSavingsSchedules || !validSavingsAchievements || !validGoalTransactions) throw new Error('O backup contém registros inválidos. Nenhum dado foi alterado.')
   return {
     version: 1,
     theme: data.theme,
@@ -479,6 +494,7 @@ function parseAppData(value: unknown): AppData {
     accounts: data.accounts,
     notes,
     reminderDays,
+    ...(dashboardPreferences === undefined ? {} : { dashboardPreferences }),
     savingsGoals,
     savingsSchedules,
     savingsAchievements,
@@ -514,11 +530,6 @@ function readData(): AppData {
   const stored = localStorage.getItem(STORAGE_KEY)
   if (!stored) return emptyData()
   return parseAppData(JSON.parse(stored) as unknown)
-}
-
-type DashboardPreferences = {
-  selectedAccountIds: string[] | null
-  hideBalance: boolean
 }
 
 function readDashboardPreferences(key: string): DashboardPreferences {
@@ -694,7 +705,10 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
   const [data, setData] = useState<AppData | null>(initial.data)
   const [storageError, setStorageError] = useState(initial.error)
   const dashboardPreferencesKey = `${DASHBOARD_PREFERENCES_KEY}${cloudUser ? `:${cloudUser}` : ''}`
-  const [dashboardPreferences, setDashboardPreferences] = useState(() => readDashboardPreferences(dashboardPreferencesKey))
+  const [dashboardPreferences, setDashboardPreferences] = useState(() =>
+    initial.data?.dashboardPreferences ?? readDashboardPreferences(dashboardPreferencesKey),
+  )
+  const dashboardPreferencesMigrationComplete = useRef(initial.data?.dashboardPreferences !== undefined)
   const [page, setPage] = useState<Page>('dashboard')
   const [transactionModal, setTransactionModal] = useState<Transaction | 'new' | null>(null)
   const [newTransactionDate, setNewTransactionDate] = useState(todayString)
@@ -751,6 +765,17 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
     }
     onCloudPersist?.(next)
   }
+
+  const updateDashboardPreferences = (next: DashboardPreferences) => {
+    setDashboardPreferences(next)
+    if (data) persist({ ...data, dashboardPreferences: next })
+  }
+
+  useEffect(() => {
+    if (!data || data.dashboardPreferences || dashboardPreferencesMigrationComplete.current) return
+    dashboardPreferencesMigrationComplete.current = true
+    persist({ ...data, dashboardPreferences })
+  }, [data, dashboardPreferences])
 
   useEffect(() => {
       if (!data) return
@@ -1390,14 +1415,19 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
       return
     }
     if (!window.confirm(`Remover a conta “${account.name}”?`)) return
-    persist({ ...data, accounts: data.accounts.filter((item) => item.id !== account.id) })
-    setDashboardPreferences((current) => {
-      if (current.selectedAccountIds === null || !current.selectedAccountIds.includes(account.id)) return current
-      const selectedAccountIds = current.selectedAccountIds.filter((id) => id !== account.id)
-      return {
-        ...current,
-        selectedAccountIds: selectedAccountIds.length === 0 ? null : selectedAccountIds,
-      }
+    const selectedAccountIds = dashboardPreferences.selectedAccountIds
+    const remainingAccountIds = selectedAccountIds?.filter((id) => id !== account.id)
+    const nextPreferences = selectedAccountIds === null || !selectedAccountIds.includes(account.id)
+      ? dashboardPreferences
+      : {
+          ...dashboardPreferences,
+          selectedAccountIds: remainingAccountIds?.length ? remainingAccountIds : null,
+        }
+    setDashboardPreferences(nextPreferences)
+    persist({
+      ...data,
+      accounts: data.accounts.filter((item) => item.id !== account.id),
+      dashboardPreferences: nextPreferences,
     })
     setToast('Conta removida.')
   }
@@ -1418,7 +1448,9 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
     try {
       const parsed = parseAppData(JSON.parse(await file.text()) as unknown)
       if (!window.confirm(`O backup contém ${parsed.transactions.length} lançamentos e ${parsed.accounts.length} contas. Ele substituirá os dados atuais. Continuar?`)) return
-      persist(parsed)
+      const importedPreferences = parsed.dashboardPreferences ?? dashboardPreferences
+      setDashboardPreferences(importedPreferences)
+      persist({ ...parsed, dashboardPreferences: importedPreferences })
       setToast('Backup restaurado com sucesso.')
     } catch (error) {
       setToast(error instanceof Error ? error.message : 'Não foi possível importar o backup.')
@@ -1568,9 +1600,9 @@ function FinanceApp({ initialData, cloudUser, cloudLabel, cloudSyncStatus, cloud
               income={incomeThisMonth}
               expense={expenseThisMonth}
               selectedAccountIds={dashboardPreferences.selectedAccountIds}
-              onSelectedAccountIdsChange={(selectedAccountIds) => setDashboardPreferences((current) => ({ ...current, selectedAccountIds }))}
+              onSelectedAccountIdsChange={(selectedAccountIds) => updateDashboardPreferences({ ...dashboardPreferences, selectedAccountIds })}
               hideBalance={dashboardPreferences.hideBalance}
-              onHideBalanceChange={(hideBalance) => setDashboardPreferences((current) => ({ ...current, hideBalance }))}
+              onHideBalanceChange={(hideBalance) => updateDashboardPreferences({ ...dashboardPreferences, hideBalance })}
               savingsRate={savingsRate}
               onAdd={() => setTransactionModal('new')}
               onNavigate={setPage}
